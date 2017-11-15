@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.program.advanced.launcher" name="Advanced Launcher" version="1.13.2" provider-name="Angelscry">
+    <requires>
+        <import addon="xbmc.python" version="2.1.0"/>
+        <import addon="script.module.simplejson" version="2.0.10"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="addon.py">
+        <provides>executable</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <platform>all</platform>
+        <disclaimer>For XBMC Krypton / Jarvis / Isengard / Helix / Gotham / Frodo / Eden / Dharma</disclaimer>
+        <summary lang="de">Beliebige Anwendungen aus XBMC starten.</summary>
+        <summary lang="en">Start any applications from XBMC.</summary>
+        <summary lang="fr">Lancer n'importer quelle application depuis XBMC.</summary>
+        <summary lang="fi">Käynnistää sovelluksia XBMC:stä</summary>
+        <description lang="de">[Inoffizielle Veröffentlichung von SpiralCut basierend auf der ursprünglichen Version 1.13.1] Advanced Launcher erlaubt das Starten beliebiger Linux, Windows und OS X Anwendungen (mit oder ohne Kommandozeile) direkt aus der XBMC Oberfläche. Advanced Launcher erlaubt weiterhin das Editieren, Herunterladen und Verwalten der Metadaten (Informationen und Bilder) für diese Anwendungen aus dem Internet.</description>
+        <description lang="en">[Unofficial release by SpiralCut based off of original 1.13.1 release] Advanced Launcher allows you to start any Linux, Windows and OS X applications (with command line support or not) directly from the XBMC GUI. Advanced Launcher also give you the possibility to edit, download (from Internet resources) and manage all the meta-data (informations and images) related to these applications.</description>
+        <description lang="fr">[Version non officielle de SpiralCut basée sur la version 1.13.1 originale] Advanced Launcher permet de lancer toutes les applications Linux, Windows and OS X (avec support des lignes de commandes ou non) directement depuis l'interface d'XBMC. Advanced Launcher offre également la possibilité de modifier, télécharger (depuis les ressoures web) et de gérer toues les meta-donées (informations et images) relatives à ces applications.</description>
+        <description lang="fi">[SpiralCutin epävirallinen julkaisu alkuperäisen 1.13.1 julkaisun perusteella] Advanced Launcherilla voit käynnistää XBMC:n käyttöliittymästä mitä tahansa sovelluksia. Käynnistettävistä sovelluksista voi hakea tietoja ja kuvia Internet-tietokannoista.</description>
+    </extension>
+</addon>
