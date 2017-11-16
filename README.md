@@ -17,4 +17,5 @@ This is an updated fork of Angelscry's Advanced Launcher Kodi plugin.  The only
 	<ul>
 		<li>You may need to change your Kodi settings to allow installing from unknown sources before you see the option to "Install from Zip File"</li>
 	</ul>
+	<li>Note that if you have assigned links/favorites to locations within Advanced Launcher they may not work with this build.  To fix this, access Advanced Launcher through the Kodi Addon Browser and recreate your favorites/assign links.
 </ul>
