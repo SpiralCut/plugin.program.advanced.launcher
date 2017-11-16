@@ -3,6 +3,7 @@
 . Update Google scraper to use new Google image sizes.
 . Remove AllGame (RIP), HTBackdrops (RIP), and ComicVine (bad API, quick bans) scrapers.
 . Add message when GameFAQs has blocked your account for excessive searches.
+. Updated script compatibility for Krypton+.
 
 [B]1.13.1[/B]
 . Fix thumb/fanart image local import for items.
