@@ -29,14 +29,13 @@ def _get_game_page_url(system,search):
         gets = gets.split('<div class="search_result">')
         counter = 0
         for get in gets:
-            if get.find('<div class="sr_product_name">') <> -1:
+            if get.find('<div class="sr_name">') <> -1:
                 gameplatforms = {}
                 title = {}
                 info = {}
                 counter = counter + 1
                 gameplatforms = re.findall('<div class="sr_product_name"><a class="sevent" data-row=".*?" data-col="(.*?)" href="(.*?)">(.*?)</a>', get)                
                 title = re.findall('<div class="sr_name"><a class="sevent" data-row=".*?" data-col=".*?" href=".*?">(.*?)</a></div>', get)
-                info =  re.findall('<div class="sr_info">(.*?), (.*?), (.*?)</div>', get)
                 for gameplatform in gameplatforms:
                     games = {}
                     if platform == gameplatform[2]:
