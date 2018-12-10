@@ -52,7 +52,7 @@ def _get_game_page_url(system,search):
         return link
     except urllib2.HTTPError, e:
         if e.reason == "Unauthorized":
-            ret = xbmcgui.Dialog().yesno(__language__( 30110 ), __language__( 30111 ), __language__( 30112 ), __language__( 30113 ),__language__( 30114 ), __language__( 30115 ))  
+            ret = xbmcgui.Dialog().yesno(__language__( 30196 ), __language__( 30197 ), __language__( 30198 ), __language__( 30199 ),__language__( 30207 ), __language__( 30208 ))  
             if ret:
                 return link
             else:
@@ -78,7 +78,7 @@ def _get_fanarts_list(system,search,imgsize):
         return full_fanarts
     except urllib2.HTTPError, e:
         if e.reason == "Unauthorized":
-            ret = xbmcgui.Dialog().yesno(__language__( 30110 ), __language__( 30111 ), __language__( 30112 ), __language__( 30113 ),__language__( 30114 ), __language__( 30115 ))  
+            ret = xbmcgui.Dialog().yesno(__language__( 30196 ), __language__( 30197 ), __language__( 30198 ), __language__( 30199 ),__language__( 30207 ), __language__( 30208 ))  
             if ret:
                 return full_fanarts
             else:
@@ -100,7 +100,7 @@ def _get_fanart(image_url):
         return images[0]
     except urllib2.HTTPError, e:
         if e.reason == "Unauthorized":
-            ret = xbmcgui.Dialog().yesno(__language__( 30110 ), __language__( 30111 ), __language__( 30112 ), __language__( 30113 ),__language__( 30114 ), __language__( 30115 ))  
+            ret = xbmcgui.Dialog().yesno(__language__( 30196 ), __language__( 30197 ), __language__( 30198 ), __language__( 30199 ),__language__( 30207 ), __language__( 30208 ))  
             if ret:
                 return ""
             else:

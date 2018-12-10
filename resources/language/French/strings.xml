@@ -65,13 +65,6 @@
     <string id="30106">Ajouter des objets</string>
     <string id="30107">Éditer l'objet</string>
     <string id="30109">Éditer le lanceur</string>
-    <string id="30110">Can't Access GameFAQs</string>
-    <string id="30111">Your IP address may be blocked due to excessive searches.</string>
-    <string id="30112">If you would like to continue, you may need to go to GameFAQs and complete a capcha on the search page.</string>
-    <string id="30113">If you have already completed this step, you may need to wait a few seconds</string>
-    <string id="30114">Continue</string>
-    <string id="30115">Cancel</string>
-
     
     <string id="30120">Mode d'importation</string>
     <string id="30121">Source web</string>
@@ -91,9 +84,9 @@
     <string id="30138">Petite</string>
     <string id="30139">Moyenne</string>
     <string id="30140">Grande</string>
-    <string id="30141">720p</string>
-    <string id="30142">1080p</string>
-    <string id="30143">4K</string>
+    <string id="30141">Très grande</string>
+    <string id="30142">Très très grande</string>
+    <string id="30143">Énorme</string>
     <string id="30144">Europe</string>
     <string id="30145">Japon</string>
     <string id="30146">Amérique</string>
@@ -130,13 +123,34 @@
     <string id="30178">Captures d'écran</string>
     <string id="30179">Flyers</string>
     <string id="30180">Régler le délais du lanceur (ms)</string>
+    <string id="30181">Options de sauvegarde</string>
+    <string id="30182">Activer la sauvegarde automatique</string>
+    <string id="30183">Avancé</string>
+    <string id="30184">Nombre de sauvegardes à conserver</string>
+    <string id="30185">Importer un fichier XML (restaurer une sauvegarde)</string>
+    <string id="30186">Choisir le fichier XML à importer</string>
+    <string id="30187">Afficher les logs d'Advanced Launcher dans kodi.log</string>
+    <string id="30188">Options d'affichage</string>
+    <string id="30189">Cacher la catégorie "Default"</string>
+    <string id="30190">Fusionner un fichier XML (joindre les listes de lanceurs)</string>
+    <string id="30191">Choisir le fichier XML à fusionner</string>
+    <string id="30192">Fusionner</string>
+    <string id="30193">Option de démarrage des lanceurs</string>
+    <string id="30194">Ajouter un nouveau lanceur</string>
+    <string id="30195">Ouvrir Advanced Launcher directement dans la catégorie "Default"</string>
+    <string id="30196">Can't Access GameFAQs</string>
+    <string id="30197">Your IP address may be blocked due to excessive searches.</string>
+    <string id="30198">If you would like to continue, you may need to go to GameFAQs and complete a capcha on the search page.</string>
+    <string id="30199">If you have already completed this step, you may need to wait a few seconds</string>
 
     <string id="30201">défaut</string>
     <string id="30202">Utilisateurs expérimentés</string>
-    <string id="30203">Basculer XBMC en plein écran</string>
+    <string id="30203">Basculer Kodi en plein écran</string>
     <string id="30204">Activé</string>
     <string id="30205">Désactivé</string>
     <string id="30206">Support des raccourcis (.lnk)</string>
+    <string id="30207">Continue</string>
+    <string id="30208">Cancel</string>
 
     <string id="30300">Choisir une action pour %s</string>
     <string id="30301">Modifier les informations</string>
@@ -156,7 +170,7 @@
     <string id="30313">Choisir une image locale (créer un lien)</string>
     <string id="30315">Modifier les arguments : %s</string>
     <string id="30316">Sauver dans un fichier .nfo</string>
-    <string id="30329">Basculer XBMC en mode fenétré : %s</string>
+    <string id="30329">Basculer Kodi en mode fenétré : %s</string>
     <string id="30317">Modifier les extensions des objets : %s</string>
     <string id="30318">Vider la liste des objets</string>
     <string id="30319">Modifier les informations du lanceur</string>

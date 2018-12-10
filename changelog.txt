@@ -1,9 +1,162 @@
-[B]1.13.2[/B]
-. Fix GameFAQs, MobyGames, TheGamesDB, arcadeHITS, and Google scrapers.
-. Update Google scraper to use new Google image sizes.
-. Remove AllGame (RIP), HTBackdrops (RIP), and ComicVine (bad API, quick bans) scrapers.
-. Add message when GameFAQs has blocked your account for excessive searches.
-. Updated script compatibility for Krypton+.
+[B]2.5.8[/B]
+. Esthetic update related to Kodi/Helix version.
+
+[B]2.5.7[/B]
+. Rollback suspend audio feature bring by version 2.5.4.
+
+[B]2.5.6[/B]
+. Fix encoding detection error bug.
+
+[B]2.5.5[/B]
+. Fix encoding detection error on Android based systems.
+
+[B]2.5.4[/B]
+. Suspend audio regardless of mediastate. Thanks to zzattack.
+
+[B]2.5.3[/B]
+. Disable "%rom%" default argument for stand alone launcher.
+
+[B]2.5.2[/B]
+. Fix XBMC Gotham compatibility
+
+[B]2.5.1[/B]
+. Fix GameFAQs scrapers.
+. Fix empty query launcher bug.
+. Code cleaning.
+
+[B]2.5.0[/B]
+. Add feature to mark categories as finished/unfinished.
+. Modify settings to show/hide finished categories/launcher/items.
+. Improve launchers.xml file parsing.
+. Fix compatibility with launchers.xml files created from 2.0.0 prior versions.
+
+[B]2.4.5[/B]
+. Fix default thumbs and fanarts paths for query and favourite launchers.
+
+[B]2.4.4[/B]
+. Fix first favourite item list launcher creation bug.
+
+[B]2.4.3[/B]
+. Add a new info collecting method : NFO+scraper
+
+[B]2.4.2[/B]
+. Fix GameFAQs info scraper.
+. Fix GameFAQs gamesystem reference list.
+
+[B]2.4.1[/B]
+. Fix ComicVine thumbs scraper.
+
+[B]2.4.0[/B]
+. Add favourite launchers creation.
+
+[B]2.3.2[/B]
+. Fix thumb and fanart link creation for categories, launchers and items.
+
+[B]2.3.1[/B]
+. Fix GameFAQs thumbs and fanarts scrapers.
+
+[B]2.3.0[/B]
+. Add a queries launcher creation.
+. Fix message display for launchers fanart image change.
+. Fix message display for items fanart image change.
+
+[B]2.2.8[/B]
+. Fix "Remote Share" Could not connect to network server message display under Windows.
+
+[B]2.2.7[/B]
+. Fix ComicVine data scrapers.
+
+[B]2.2.6[/B]
+. Fix platform ID change for GameFAQs scrapers.
+
+[B]2.2.5[/B]
+. Fix launcher information display
+
+[B]2.2.4[/B]
+. Fix Minimize option save.
+
+[B]2.2.3[/B]
+. Fix Sega Genesis 32X scrapers references
+
+[B]2.2.2[/B]
+. Fix unclosed opened CSV and NFO files.
+. Fix negative handle problem.
+. Fix TheGameDB cached thumbs images display list.
+
+[B]2.2.1[/B]
+. Fix XBMC notification display bugs.
+
+[B]2.2.0[/B]
+. Fix XBMC notification icon display.
+. Rewrite launchers.xml load/save functions.
+. Code cleaning.
+. Change python dependence to version 2.1.
+
+[B]2.1.0[/B]
+. Add an option to directly open Advanced Launcher into default category.
+. Update launchers.xml file format.
+. Update french translation.
+
+[B]2.0.15[/B]
+. Update German translation (thanks to mbroemme).
+
+[B]2.0.14[/B]
+. Fix GameFAQs scrapers (gamesystem list update).
+. Remove MobyGames scraper (until it will work correctly).
+
+[B]2.0.13[/B]
+. Fix TheGameDB scrapers (info, thumbs and fanarts).
+
+[B]2.0.12[/B]
+. Fix images download bug into automatic scan mode.
+. Improve download image algorithm.
+
+[B]2.0.11[/B]
+. Fix TheGameDB scrapers (info, thumbs and fanarts).
+. Change download image runtime.
+
+[B]2.0.10[/B]
+. Fix GameFAQs scrapers (info, thumbs and fanarts).
+. Fix post-Frodo XBMC versions compatibility.
+. Fix toogle fullscreen option for files launchers.
+
+[B]2.0.9[/B]
+. Restore post-Frodo XBMC versions compatibility.
+
+[B]2.0.8[/B]
+. Fix non-existing category bug.
+. Add empty launcher display message.
+. Add file/directory path not exist error messages.
+
+[B]2.0.7[/B]
+. Fix No fanart message display.
+. Fix change category display.
+
+[B]2.0.6[/B]
+. Fix audio sound loop when starting an application.
+
+[B]2.0.5[/B]
+. Fix AudioEngine hog (thanks to fritsch and Nortin).
+
+[B]2.0.4[/B]
+. Fix ComicVine scraper.
+
+[B]2.0.3[/B]
+. Fix category assignment for files launcher creation.
+
+[B]2.0.2[/B]
+. Add alternative application option for each items.
+. Add alternative argument option for each items. 
+
+[B]2.0.1[/B]
+. Fix caterory creation bug.
+
+[B]2.0.0[/B]
+. Add category parameter to launchers.
+. Add option to show"hide the default category.
+. Add category title, genre, description modification option.
+. Add category's thumb and fanart support (scrap/copy/link options).
+. Add launchers.xml files merging option
 
 [B]1.13.1[/B]
 . Fix thumb/fanart image local import for items.

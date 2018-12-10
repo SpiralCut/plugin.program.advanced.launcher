@@ -13,63 +13,53 @@
 """
 
 # -*- coding: UTF-8 -*
-# main imports
-import sys
-import os
-import fnmatch
-import xbmc
-import xbmcgui
-import xbmcplugin
-
-import time, datetime
-import math
-import re
-import urllib
-import subprocess_hack
-import xml.dom.minidom
-import socket
-import exceptions
-import imghdr
-
-import random
+import sys, os, fnmatch, time, datetime, math, random, shutil
+import re, urllib, urllib2, subprocess_hack, socket, exceptions
 from traceback import print_exc
 from operator import itemgetter
 
-import shutil
-from file_item import Thumbnails
-thumbnails = Thumbnails()
+import xbmc, xbmcgui, xbmcplugin
+from xbmcaddon import Addon
 
+import subprocess_hack
+from user_agent import getUserAgent
+from file_item import Thumbnails
+from xml.dom.minidom import parse
+
+# Dharma compatibility (import md5)
 try:
-    # Eden & + compatible
     import hashlib
 except:
-    # Dharma compatible
     import md5
 
-from xbmcaddon import Addon
-PLUGIN_DATA_PATH = xbmc.translatePath( os.path.join( "special://profile/addon_data", "plugin.program.advanced.launcher") )
-__settings__ = Addon( id="plugin.program.advanced.launcher" )
-__lang__ = __settings__.getLocalizedString
+# Addon paths definition
+PLUGIN_DATA_PATH = xbmc.translatePath(os.path.join("special://profile/addon_data","plugin.program.advanced.launcher"))
+BASE_PATH = xbmc.translatePath(os.path.join("special://","profile"))
+HOME_PATH = xbmc.translatePath(os.path.join("special://","home"))
+FAVOURITES_PATH = xbmc.translatePath( 'special://profile/favourites.xml' )
+ADDONS_PATH = xbmc.translatePath(os.path.join(HOME_PATH,"addons"))
+CURRENT_ADDON_PATH = xbmc.translatePath(os.path.join(ADDONS_PATH,"plugin.program.advanced.launcher"))
+BASE_CURRENT_SOURCE_PATH = os.path.join(PLUGIN_DATA_PATH,"launchers.xml")
+TEMP_CURRENT_SOURCE_PATH = os.path.join(PLUGIN_DATA_PATH,"launchers.tmp")
+MERGED_SOURCE_PATH = os.path.join(PLUGIN_DATA_PATH,"merged-launchers.xml")
+DEFAULT_THUMB_PATH = os.path.join(PLUGIN_DATA_PATH,"thumbs")
+DEFAULT_FANART_PATH = os.path.join(PLUGIN_DATA_PATH,"fanarts")
+DEFAULT_NFO_PATH = os.path.join(PLUGIN_DATA_PATH,"nfos")
+DEFAULT_BACKUP_PATH = os.path.join(PLUGIN_DATA_PATH,"backups")
+SHORTCUT_FILE = os.path.join(PLUGIN_DATA_PATH,"shortcut.cut")
+ICON_IMG_FILE = os.path.join(CURRENT_ADDON_PATH,"icon.png")
 
-def __language__(string):
-    return __lang__(string).encode('utf-8','ignore')
-
-# source path for launchers data
-BASE_PATH = xbmc.translatePath( os.path.join( "special://" , "profile" ) )
-BASE_CURRENT_SOURCE_PATH = os.path.join( PLUGIN_DATA_PATH , "launchers.xml" )
-TEMP_CURRENT_SOURCE_PATH = os.path.join( PLUGIN_DATA_PATH , "launchers.tmp" )
-SHORTCUT_FILE = os.path.join( PLUGIN_DATA_PATH , "shortcut.cut" )
-
-DEFAULT_THUMB_PATH = os.path.join( PLUGIN_DATA_PATH , "thumbs" )
+# Addon paths creation
 if not os.path.exists(DEFAULT_THUMB_PATH): os.makedirs(DEFAULT_THUMB_PATH)
-DEFAULT_FANART_PATH = os.path.join( PLUGIN_DATA_PATH , "fanarts" )
 if not os.path.exists(DEFAULT_FANART_PATH): os.makedirs(DEFAULT_FANART_PATH)
-DEFAULT_NFO_PATH = os.path.join( PLUGIN_DATA_PATH , "nfos" )
 if not os.path.exists(DEFAULT_NFO_PATH): os.makedirs(DEFAULT_NFO_PATH)
-DEFAULT_BACKUP_PATH = os.path.join( PLUGIN_DATA_PATH , "backups" )
 if not os.path.exists(DEFAULT_BACKUP_PATH): os.makedirs(DEFAULT_BACKUP_PATH)
+if not os.path.isdir(PLUGIN_DATA_PATH): os.makedirs(PLUGIN_DATA_PATH)
 
+# Addon commands
 REMOVE_COMMAND = "%%REMOVE%%"
+BACKUP_COMMAND = "%%BACKUP%%"
+APPEND_COMMAND = "%%APPEND%%"
 FILE_MANAGER_COMMAND = "%%FILEMANAGER%%"
 ADD_COMMAND = "%%ADD%%"
 EDIT_COMMAND = "%%EDIT%%"
@@ -78,46 +68,35 @@ GET_INFO = "%%GET_INFO%%"
 GET_THUMB = "%%GET_THUMB%%"
 GET_FANART = "%%GET_FANART%%"
 SEARCH_COMMAND = "%%SEARCH%%"
+SEARCH_ITEM_COMMAND = "%%SEARCH_ITEM%%"
 SEARCH_DATE_COMMAND = "%%SEARCH_DATE%%"
 SEARCH_PLATFORM_COMMAND = "%%SEARCH_PLATFORM%%"
 SEARCH_STUDIO_COMMAND = "%%SEARCH_STUDIO%%"
 SEARCH_GENRE_COMMAND = "%%SEARCH_GENRE%%"
+SCAN_NEW_ITEM_COMMAND = "%%SCAN_NEW_ITEM%%"
+
+# Locales parameters
+__settings__ = Addon( id="plugin.program.advanced.launcher" )
+__lang__ = __settings__.getLocalizedString
+
+def __language__(string):
+    return __lang__(string).encode('utf-8','ignore')
+
+# Main code
 
 class Main:
-    BASE_CACHE_PATH = xbmc.translatePath(os.path.join( "special://profile/Thumbnails", "Pictures" ))
     launchers = {}
-
-    ''' initializes plugin and run the requiered action
-        arguments:
-            argv[0] - the path of the plugin (supplied by XBMC)
-            argv[1] - the handle of the plugin (supplied by XBMC)
-            argv[2] - one of the following (__language__( 30000 ) and 'rom' can be any launcher name or rom name created with the plugin) :
-                /launcher - open the specific launcher (if exists) and browse its roms
-                            if the launcher is standalone - run it.
-                /launcher/rom - run the specifiec rom using it's launcher.
-                                ignore command if doesn't exists.
-                /launcher/%%REMOVE%% - remove the launcher
-                /launcher/%%ADD%% - add a new rom (open wizard)
-                /launcher/rom/%%REMOVE%% - remove the rom
-                /%%ADD%% - add a new launcher (open wizard)
-                /launcher/%%GET_INFO%% - get launcher info from configured scraper
-                /launcher/%%GET_THUMB%% - get launcher thumb from configured scraper
-                /launcher/%%GET_FANART%% - get launcher fanart from configured scraper
-                /launcher/rom/%%GET_INFO%% - get rom info from configured scraper
-                /launcher/rom/%%GET_THUMB%% - get rom thumb from configured scraper
-                /launcher/rom/%%GET_FANART%% - get rom fanart from configured scraper
-
-                (blank)     - open a list of the available launchers. if no launcher exists - open the launcher creation wizard.
-    '''
+    categories = {}
 
     def __init__( self, *args, **kwargs ):
         # store an handle pointer
         self._handle = int(sys.argv[ 1 ])
-
         self._path = sys.argv[ 0 ]
 
         # get users preference
         self._get_settings()
+
+        # Load launchers
         self._load_launchers(self.get_xml_source(BASE_CURRENT_SOURCE_PATH))
 
         # get users scrapers preference
@@ -133,102 +112,153 @@ class Main:
         self._print_log(__language__( 30700 ))
 
         # if a commmand is passed as parameter
-        param = sys.argv[ 2 ]
+        param = sys.argv[ 2 ].replace("%2f","/")
 
-        xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_LABEL)
-        xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_VIDEO_YEAR)
-        xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_STUDIO)
-        xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_GENRE)
-        xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_UNSORTED)
+        if ( self._handle > 0 ):
+            xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_LABEL)
+            xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_VIDEO_YEAR)
+            xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_STUDIO)
+            xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_GENRE)
+            xbmcplugin.addSortMethod(handle=self._handle, sortMethod=xbmcplugin.SORT_METHOD_UNSORTED)
 
+        # If parameters are passed...
         if param:
             param = param[1:]
             command = param.split(COMMAND_ARGS_SEPARATOR)
-            dirname = os.path.dirname(command[0])
-            basename = os.path.basename(command[0])
+            command_part = command[0].split("/")
+
             # check the action needed
-            if (dirname):
-                launcher = dirname
-                rom = basename
+            if ( len(command_part) == 4 ):
+                category = command_part[0]
+                launcher = command_part[1]
+                rom = command_part[2]
+                action = command_part[3]
+
+                if (action == SEARCH_COMMAND):
+                    self._find_roms(False)
+                if (action == REMOVE_COMMAND):
+                    self._remove_rom(launcher, rom)
+                elif (action == EDIT_COMMAND):
+                    self._edit_rom(launcher, rom)
+                elif (action == GET_INFO):
+                    self._scrap_rom(launcher, rom)
+                elif (action == GET_THUMB):
+                    self._scrap_thumb_rom(launcher, rom)
+                elif (action == GET_FANART):
+                    self._scrap_fanart_rom(launcher, rom)
+
+            if ( len(command_part) == 3 ):
+                category = command_part[0]
+                launcher = command_part[1]
+                rom = command_part[2]
+
+                if (rom == SEARCH_COMMAND):
+                    self._find_roms(False)
                 if (rom == REMOVE_COMMAND):
-                    # check if it is a single rom or a launcher
-                    if (not os.path.dirname(launcher)):
-                        self._remove_launcher(launcher)
-                    else:
-                        self._remove_rom(os.path.dirname(launcher), os.path.basename(launcher))
+                    self._remove_launcher(launcher)
                 elif (rom == EDIT_COMMAND):
-                    # check if it is a single rom or a launcher
-                    if (not os.path.dirname(launcher)):
-                        self._edit_launcher(launcher)
-                    else:
-                        self._edit_rom(os.path.dirname(launcher), os.path.basename(launcher))
+                    self._edit_launcher(launcher)
                 elif (rom == GET_INFO):
-                    # check if it is a single rom or a launcher
-                    if (not os.path.dirname(launcher)):
-                        self._scrap_launcher(launcher)
-                    else:
-                        self._scrap_rom(os.path.dirname(launcher), os.path.basename(launcher))
+                    self._scrap_launcher(launcher)
                 elif (rom == GET_THUMB):
-                    # check if it is a single rom or a launcher
-                    if (not os.path.dirname(launcher)):
-                        self._scrap_thumb_launcher(launcher)
-                    else:
-                        self._scrap_thumb_rom(os.path.dirname(launcher), os.path.basename(launcher))
+                    self._scrap_thumb_launcher(launcher)
                 elif (rom == GET_FANART):
-                    # check if it is a single rom or a launcher
-                    if (not os.path.dirname(launcher)):
-                        self._scrap_fanart_launcher(launcher)
-                    else:
-                        self._scrap_fanart_rom(os.path.dirname(launcher), os.path.basename(launcher))
+                    self._scrap_fanart_launcher(launcher)
+                elif (category == SCAN_NEW_ITEM_COMMAND):
+					self._import_roms(launcher, addRoms = False)
                 elif (rom == ADD_COMMAND):
                     self._add_roms(launcher)
-                elif (rom == SEARCH_COMMAND):
-                    self._find_add_roms(launcher)
-                elif (rom == SEARCH_DATE_COMMAND):
-                    self._find_date_add_roms(launcher)
-                elif (rom == SEARCH_PLATFORM_COMMAND):
-                    self._find_platform_add_roms(launcher)
-                elif (rom == SEARCH_STUDIO_COMMAND):
-                    self._find_studio_add_roms(launcher)
-                elif (rom == SEARCH_GENRE_COMMAND):
-                    self._find_genre_add_roms(launcher)
                 else:
                     self._run_rom(launcher, rom)
-            else:
-                launcher = basename
 
-                if (launcher == "backup"):
+            if ( len(command_part) == 2 ):
+                category = command_part[0]
+                launcher = command_part[1]
+
+                if (launcher == SEARCH_COMMAND):
+                    self._find_roms(False)
+                elif (launcher == FILE_MANAGER_COMMAND):
+                    self._file_manager()
+                elif (launcher == EDIT_COMMAND):
+                    self._edit_category(category)
+                elif (launcher == GET_INFO):
+                    self._modify_category(category)
+                    xbmc.executebuiltin("Container.Refresh")
+                elif (launcher == GET_THUMB):
+                    self._scrap_thumb_category(category)
+                elif (launcher == GET_FANART):
+                    self._scrap_fanart_category(category)
+                elif (launcher == ADD_COMMAND):
+                    self._add_new_launcher(category)
+                    
+                # Search commands
+                elif (launcher == SEARCH_ITEM_COMMAND):
+                    self._find_add_roms(category)
+                elif (launcher == SEARCH_DATE_COMMAND):
+                    self._find_date_add_roms(category)
+                elif (launcher == SEARCH_PLATFORM_COMMAND):
+                    self._find_platform_add_roms(category)
+                elif (launcher == SEARCH_STUDIO_COMMAND):
+                    self._find_studio_add_roms(category)
+                elif (launcher == SEARCH_GENRE_COMMAND):
+                    self._find_genre_add_roms(category)
+
+                else:
+                    if (self.launchers[launcher]["rompath"] == ""):
+                        self._run_launcher(launcher)
+                    else:
+                        self._get_roms(launcher)
+
+            if ( len(command_part) == 1 ):
+                category = command_part[0]
+                self._print_log(__language__( 30740 ) % category)
+
+                if (category == SCAN_NEW_ITEM_COMMAND):
+					self._find_roms(False)
+                if (category == SEARCH_COMMAND):
+                    self._find_roms(False)
+                elif (category == FILE_MANAGER_COMMAND):
+                    self._file_manager()
+                elif (category == ADD_COMMAND):
+                    self._add_new_category()
+                elif (category == BACKUP_COMMAND):
                     self._print_log(__language__( 30185 ))
                     backup_file = xbmcgui.Dialog().browse(1,__language__( 30186 ),"files",".xml", False, False, os.path.join(DEFAULT_BACKUP_PATH+"/"))
                     if (os.path.isfile(backup_file)):
                         self._load_launchers(self.get_xml_source(backup_file))
-
-                elif (launcher == SEARCH_COMMAND):#search
-                    # check if we need to get user input or search the rom list
-                    self._find_roms()
-
-                elif (launcher == FILE_MANAGER_COMMAND):#filemanager
-                    self._file_manager()
-
-                # if it's an add command
-                elif (launcher == ADD_COMMAND):
-                    self._add_new_launcher()
+                elif (category == APPEND_COMMAND):
+                    self._print_log(__language__( 30185 ))
+                    append_file = xbmcgui.Dialog().browse(1,__language__( 30191 ),"files",".xml", False, False, os.path.join(PLUGIN_DATA_PATH+"/"))
+                    if (os.path.isfile(append_file)):
+                        self._append_launchers(append_file)
+                elif ( self._empty_cat(category) ):
+                    self._add_new_launcher(category)
                 else:
-                    # if there is no rompath (a standalone launcher)
-                    if (self.launchers[launcher]["rompath"] == ""):
-                        # launch it
-                        self._run_launcher(launcher)
-                    else:
-                        self._get_roms(launcher)
+                    self._get_launchers(category)
+
         else:
-
-            # otherwise get the list of the programs in the current folder
-            if (not self._get_launchers()):
-                # if no launcher found - attempt to add a new one
-                if (self._add_new_launcher()):
-                    self._get_launchers()
+            self._print_log(__language__( 30739 ))
+            if (len(self.categories) == 0):
+                if (len(self.launchers) == 0):
+                    self._add_new_launcher('default')
                 else:
-                    xbmcplugin.endOfDirectory( handle=int( self._handle ), succeeded=False , cacheToDisc=False)
+                    categorydata = {}
+                    categorydata["name"] = 'Default'
+                    self.categories['default'] = categorydata
+                    self._save_launchers()
+                    self._get_launchers('default')
+            else:
+                if (self.settings[ "open_default_cat" ] ):
+                    self._get_launchers('default')
+                else:
+                    self._get_categories()
+
+    def _empty_cat(self, categoryID):
+        empty_category = True
+        for cat in self.launchers.iterkeys():
+            if ( self.launchers[cat]['category'] == categoryID ):
+                empty_category = False
+        return empty_category
 
     def _remove_rom(self, launcherID, rom):
         dialog = xbmcgui.Dialog()
@@ -253,17 +283,38 @@ class Main:
         dialog = xbmcgui.Dialog()
         ret = dialog.yesno(__language__( 30000 ), __language__( 30010 ) % self.launchers[launcherID]["name"])
         if (ret):
+            category = self.launchers[launcherID]["category"]
             self.launchers.pop(launcherID)
             self._save_launchers()
-            if ( len(self.launchers) == 0 ):
-                xbmc.executebuiltin("ReplaceWindow(Home)")
-            else:
+            if ( not self._empty_cat(category) ):
                 xbmc.executebuiltin("Container.Update")
+            else:
+                xbmc.executebuiltin("ReplaceWindow(Programs,%s)" % (self._path))
+
+    def _remove_category(self, categoryID):
+        dialog = xbmcgui.Dialog()
+        launcher_list = []
+        for launcherID in sorted(self.launchers.iterkeys()):
+            if (self.launchers[launcherID]['category'] == categoryID):
+                launcher_list.append(launcherID)
+        if ( len(launcher_list) > 0 ):
+            ret = dialog.yesno(__language__( 30000 ), __language__( 30345 ) % (self.categories[categoryID]["name"],len(launcher_list)), __language__( 30346 ) % self.categories[categoryID]["name"], __language__( 30010 ) % self.categories[categoryID]["name"])
+            if (ret):
+                for launcherID in launcher_list:
+                    self.launchers.pop(launcherID)
+                self.categories.pop(categoryID)
+                self._save_launchers()
+        else:
+            ret = dialog.yesno(__language__( 30000 ), __language__( 30010 ) % self.categories[categoryID]["name"])
+            if (ret):
+                self.categories.pop(categoryID)
+                self._save_launchers()
+        xbmc.executebuiltin("Container.Update")
 
     def _edit_rom(self, launcher, rom):
         dialog = xbmcgui.Dialog()
-        title=os.path.basename(self.launchers[launcher]["roms"][rom]["filename"])
-        if (self.launchers[launcher]["roms"][rom]["finished"] == "false"):
+        title=os.path.basename(self.launchers[launcher]["roms"][rom]["name"])
+        if (self.launchers[launcher]["roms"][rom]["finished"] != "true"):
             finished_display = __language__( 30339 )
         else:
             finished_display = __language__( 30340 )
@@ -355,13 +406,14 @@ class Main:
                                     file_path = os.path.join(os.path.dirname(self.launchers[launcher]["thumbpath"]),os.path.basename(filename.replace("."+filename.split(".")[-1], img_ext)))
                             if ( image != file_path ):
                                 try:
-                                    shutil.copy2( image.decode(sys.getfilesystemencoding(),'ignore') , file_path.decode(sys.getfilesystemencoding(),'ignore') )
+                                    shutil.copy2( image.decode(get_encoding(),'ignore') , file_path.decode(get_encoding(),'ignore') )
+                                    if ( self.launchers[launcher]["roms"][rom]["thumb"] != "" ):
+                                        _update_cache(file_path)
                                     self.launchers[launcher]["roms"][rom]["thumb"] = file_path
                                     self._save_launchers()
-                                    _update_cache(file_path)
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30070 )))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
                                 except OSError:
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30063 ) % self.launchers[launcher]["roms"][rom]["name"]))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30063 ) % self.launchers[launcher]["roms"][rom]["name"],3000)
 
             if (type2 == 2 ):
                 # Link to a rom thumbnail image
@@ -372,10 +424,11 @@ class Main:
                 image = xbmcgui.Dialog().browse(2,__language__( 30041 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(imagepath))
                 if (image):
                     if (os.path.isfile(image)):
+                        if ( self.launchers[launcher]["roms"][rom]["thumb"] != "" ):
+                            _update_cache(image)
                         self.launchers[launcher]["roms"][rom]["thumb"] = image
                         self._save_launchers()
-                        _update_cache(image)
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30070 )))
+                        xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
 
         if (type == 3 ):
             dialog = xbmcgui.Dialog()
@@ -387,7 +440,7 @@ class Main:
                 self._scrap_fanart_rom(launcher,rom)
             if (type2 == 1 ):
                 # Import a rom fanart image
-                image = xbmcgui.Dialog().browse(2,__language__( 30041 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(self.launchers[launcher]["fanartpath"]))
+                image = xbmcgui.Dialog().browse(2,__language__( 30042 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(self.launchers[launcher]["fanartpath"]))
                 if (image):
                     if (os.path.isfile(image)):
                         img_ext = os.path.splitext(image)[-1][0:4]
@@ -405,13 +458,14 @@ class Main:
                                     file_path = os.path.join(os.path.dirname(self.launchers[launcher]["fanartpath"]),os.path.basename(filename.replace("."+filename.split(".")[-1], img_ext)))
                             if ( image != file_path ):
                                 try:
-                                    shutil.copy2( image.decode(sys.getfilesystemencoding(),'ignore') , file_path.decode(sys.getfilesystemencoding(),'ignore') )
+                                    shutil.copy2( image.decode(get_encoding(),'ignore') , file_path.decode(get_encoding(),'ignore') )
+                                    if ( self.launchers[launcher]["roms"][rom]["fanart"] != "" ):
+                                        _update_cache(file_path)
                                     self.launchers[launcher]["roms"][rom]["fanart"] = file_path
                                     self._save_launchers()
-                                    _update_cache(file_path)
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30075 )))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
                                 except OSError:
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30064 ) % self.launchers[launcher]["roms"][rom]["name"]))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30064 ) % self.launchers[launcher]["roms"][rom]["name"],3000)
             if (type2 == 2 ):
                 # Link to a rom fanart image
                 if (self.launchers[launcher]["roms"][rom]["fanart"] == ""):
@@ -421,13 +475,14 @@ class Main:
                 image = xbmcgui.Dialog().browse(2,__language__( 30042 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(imagepath))
                 if (image):
                     if (os.path.isfile(image)):
+                        if ( self.launchers[launcher]["roms"][rom]["fanart"] != "" ):
+                            _update_cache(image)
                         self.launchers[launcher]["roms"][rom]["fanart"] = image
                         self._save_launchers()
-                        _update_cache(image)
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30075 )))
+                        xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
 
         if (type == 4 ):
-            if (self.launchers[launcher]["roms"][rom]["finished"] == "false"):
+            if (self.launchers[launcher]["roms"][rom]["finished"] != "true"):
                 self.launchers[launcher]["roms"][rom]["finished"] = "true"
             else:
                 self.launchers[launcher]["roms"][rom]["finished"] = "false"
@@ -435,18 +490,37 @@ class Main:
 
         if (type == 5 ):
             dialog = xbmcgui.Dialog()
-            type2 = dialog.select(__language__( 30323 ), [__language__( 30337 ) % self.launchers[launcher]["roms"][rom]["filename"], __language__( 30341 ) % self.launchers[launcher]["roms"][rom]["trailer"], __language__( 30331 ) % self.launchers[launcher]["roms"][rom]["custom"]])
+            type2 = dialog.select(__language__( 30323 ), [__language__( 30337 ) % self.launchers[launcher]["roms"][rom]["filename"], __language__( 30347 ) % self.launchers[launcher]["roms"][rom]["altapp"], __language__( 30348 ) % self.launchers[launcher]["roms"][rom]["altarg"], __language__( 30341 ) % self.launchers[launcher]["roms"][rom]["trailer"], __language__( 30331 ) % self.launchers[launcher]["roms"][rom]["custom"]])
             if (type2 == 0 ):
                 # Selection of the item file
                 item_file = xbmcgui.Dialog().browse(1,__language__( 30017 ),"files","."+self.launchers[launcher]["romext"].replace("|","|."), False, False, self.launchers[launcher]["roms"][rom]["filename"])
                 self.launchers[launcher]["roms"][rom]["filename"] = item_file
                 self._save_launchers()
             if (type2 == 1 ):
+            # Launcher application path menu option
+                if (os.environ.get( "OS", "xbox" ) == "xbox"):
+                    filter = ".xbe|.cut"
+                else:
+                    if (sys.platform == "win32"):
+                        filter = ".bat|.exe|.cmd|.lnk"
+                    else:
+                        filter = ""
+                app = xbmcgui.Dialog().browse(1,__language__( 30023 ),"files",filter, False, False, self.launchers[launcher]["roms"][rom]["altapp"])
+                self.launchers[launcher]["roms"][rom]["altapp"] = app
+                self._save_launchers()
+            # Edition of the launcher arguments
+            if (type2 == 2 ):
+                keyboard = xbmc.Keyboard(self.launchers[launcher]["roms"][rom]["altarg"], __language__( 30052 ))
+                keyboard.doModal()
+                if (keyboard.isConfirmed()):
+                    self.launchers[launcher]["roms"][rom]["altarg"] = keyboard.getText()
+                    self._save_launchers()
+            if (type2 == 3 ):
                 # Selection of the rom trailer file
                 trailer = xbmcgui.Dialog().browse(1,__language__( 30090 ),"files",".mp4|.mpg|.avi|.wmv|.mkv|.flv", False, False, self.launchers[launcher]["roms"][rom]["trailer"])
                 self.launchers[launcher]["roms"][rom]["trailer"] = trailer
                 self._save_launchers()
-            if (type2 == 2 ):
+            if (type2 == 4 ):
                 # Selection of the rom customs path
                 custom = xbmcgui.Dialog().browse(0,__language__( 30057 ),"files","", False, False, self.launchers[launcher]["roms"][rom]["custom"])
                 self.launchers[launcher]["roms"][rom]["custom"] = custom
@@ -459,13 +533,13 @@ class Main:
         xbmc.executebuiltin("Container.Refresh")
 
     def _scrap_thumb_rom_algo(self, launcher, rom, title):
-        xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000)" % (__language__( 30000 ), __language__( 30065 ) % (self.launchers[launcher]["roms"][rom]["name"],(self.settings[ "thumbs_scraper" ]).encode('utf-8','ignore'))))
+        xbmc_notify(__language__( 30000 ), __language__( 30065 ) % (self.launchers[launcher]["roms"][rom]["name"],(self.settings[ "thumbs_scraper" ]).encode('utf-8','ignore')),300000)
         xbmc.executebuiltin( "ActivateWindow(busydialog)" )
         covers = self._get_thumbnails_list(self.launchers[launcher]["roms"][rom]["gamesys"],title,self.settings["game_region"],self.settings[ "thumb_image_size" ])
         if covers:
             nb_images = len(covers)
             xbmc.executebuiltin( "Dialog.Close(busydialog)" )
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30066 ) % (nb_images,self.launchers[launcher]["roms"][rom]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30066 ) % (nb_images,self.launchers[launcher]["roms"][rom]["name"]),3000)
             covers.insert(0,(self.launchers[launcher]["roms"][rom]["thumb"],self.launchers[launcher]["roms"][rom]["thumb"],__language__( 30068 )))
             self.image_url = MyDialog(covers)
             if ( self.image_url ):
@@ -485,28 +559,28 @@ class Main:
                                     file_path = filename.replace("."+filename.split(".")[-1], img_ext)
                                 else:
                                     file_path = os.path.join(os.path.dirname(self.launchers[launcher]["thumbpath"]),os.path.basename(filename.replace("."+filename.split(".")[-1], img_ext)))
-                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000)" % (__language__( 30000 ), __language__( 30069 )))
+                            xbmc_notify(__language__( 30000 ), __language__( 30069 ),300000)
                             try:
-                                urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
-                                h = urllib.urlretrieve(img_url,file_path)
-                                filetype = imghdr.what(file_path)
-                                if str(filetype) == 'None':
-                                    raise NameError('Bad File')
+                                download_img(img_url,file_path)
+                                req = urllib2.Request(img_url)
+                                req.add_unredirected_header('User-Agent', 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.31 (KHTML, like Gecko) Chrome/26.0.1410.64 Safari/537.31')
+                                f = open(file_path,'wb')
+                                f.write(urllib2.urlopen(req).read())
+                                f.close()                                
+                                if ( self.launchers[launcher]["roms"][rom]["thumb"] != "" ):
+                                    _update_cache(file_path)
                                 self.launchers[launcher]["roms"][rom]["thumb"] = file_path
                                 self._save_launchers()
-                                _update_cache(file_path)
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30070 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
                             except socket.timeout:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30080 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30081 ),3000)
                             except exceptions.IOError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30063 ) % self.launchers[launcher]["roms"][rom]["name"]))
-                            except exceptions.NameError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30081 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30063 ) % self.launchers[launcher]["roms"][rom]["name"],3000)
                     else:
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcher]["roms"][rom]["name"])))
+                        xbmc_notify(__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcher]["roms"][rom]["name"]),3000)
         else:
             xbmc.executebuiltin( "Dialog.Close(busydialog)" )
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcher]["roms"][rom]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcher]["roms"][rom]["name"]),3000)
 
     def _scrap_thumb_rom(self, launcher, rom):
         if ( self.launchers[launcher]["application"].lower().find('mame') > 0 ) or ( self.settings[ "thumbs_scraper" ] == 'arcadeHITS' ):
@@ -520,11 +594,11 @@ class Main:
         xbmc.executebuiltin("Container.Update")
 
     def _scrap_thumb_launcher_algo(self, launcherID, title):
-        xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000)" % (__language__( 30000 ), __language__( 30065 ) % (self.launchers[launcherID]["name"],(self.settings[ "thumbs_scraper" ]).encode('utf-8','ignore'))))
+        xbmc_notify(__language__( 30000 ), __language__( 30065 ) % (self.launchers[launcherID]["name"],(self.settings[ "thumbs_scraper" ]).encode('utf-8','ignore')),30000)
         covers = self._get_thumbnails_list(self.launchers[launcherID]["gamesys"],title,self.settings["game_region"],self.settings[ "thumb_image_size" ])
         if covers:
             nb_images = len(covers)
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30066 ) % (nb_images,self.launchers[launcherID]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30066 ) % (nb_images,self.launchers[launcherID]["name"]),3000)
             covers.insert(0,(self.launchers[launcherID]["thumb"],self.launchers[launcherID]["thumb"],__language__( 30068 )))
             self.image_url = MyDialog(covers)
             if ( self.image_url ):
@@ -540,27 +614,55 @@ class Main:
                                 if (self.settings[ "launcher_thumb_path" ] == "" ):
                                     self.settings[ "launcher_thumb_path" ] = DEFAULT_THUMB_PATH
                                 file_path = os.path.join(self.settings[ "launcher_thumb_path" ],os.path.basename(self.launchers[launcherID]["application"])+'_thumb'+img_ext)
-                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000" % (__language__( 30000 ), __language__( 30069 )))
+                            xbmc_notify(__language__( 30000 ), __language__( 30069 ),300000)
                             try:
-                                urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
-                                h = urllib.urlretrieve(img_url,file_path)
-                                filetype = imghdr.what(file_path)
-                                if str(filetype) == 'None':
-                                    raise NameError('Bad File')
+                                download_img(img_url,file_path)
+                                if ( self.launchers[launcherID]["thumb"] != "" ):
+                                    _update_cache(file_path)
                                 self.launchers[launcherID]["thumb"] = file_path
                                 self._save_launchers()
-                                _update_cache(file_path)
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30070 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
                             except socket.timeout:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30080 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30081 ),3000)
                             except exceptions.IOError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30063 ) % self.launchers[launcherID]["name"]))
-                            except exceptions.NameError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30081 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30063 ) % self.launchers[launcherID]["name"],3000)
                     else:
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcherID]["name"])))
+                        xbmc_notify(__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcherID]["name"]),3000)
         else:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcherID]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30067 ) % (self.launchers[launcherID]["name"]),3000)
+
+    def _scrap_thumb_category_algo(self, categoryID, title):
+        xbmc_notify(__language__( 30000 ), __language__( 30065 ) % (self.categories[categoryID]["name"],(self.settings[ "thumbs_scraper" ]).encode('utf-8','ignore')),300000)
+        covers = self._get_thumbnails_list("",title,"",self.settings[ "thumb_image_size" ])
+        if covers:
+            nb_images = len(covers)
+            xbmc_notify(__language__( 30000 ), __language__( 30066 ) % (nb_images,self.categories[categoryID]["name"]),3000)
+            covers.insert(0,(self.categories[categoryID]["thumb"],self.categories[categoryID]["thumb"],__language__( 30068 )))
+            self.image_url = MyDialog(covers)
+            if ( self.image_url ):
+                if (not self.image_url == self.categories[categoryID]["thumb"]):
+                    img_url = self._get_thumbnail(self.image_url)
+                    if ( img_url != '' ):
+                        img_ext = os.path.splitext(img_url)[-1][0:4]
+                        if ( img_ext != '' ):
+                            filename = self.categories[categoryID]["name"]
+                            file_path = os.path.join(DEFAULT_THUMB_PATH,os.path.basename(self.categories[categoryID]["name"])+'_thumb'+img_ext)
+                            xbmc_notify(__language__( 30000 ), __language__( 30069 ),300000)
+                            try:
+                                download_img(img_url,file_path)
+                                if ( self.categories[categoryID]["thumb"] != "" ):
+                                    _update_cache(file_path)
+                                self.categories[categoryID]["thumb"] = file_path
+                                self._save_launchers()
+                                xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
+                            except socket.timeout:
+                                xbmc_notify(__language__( 30000 ), __language__( 30081 ),3000)
+                            except exceptions.IOError:
+                                xbmc_notify(__language__( 30000 ), __language__( 30063 ) % self.categories[categoryID]["name"],3000)
+                    else:
+                        xbmc_notify(__language__( 30000 ), __language__( 30067 ) % (self.categories[categoryID]["name"]),3000)
+        else:
+            xbmc_notify(__language__( 30000 ), __language__( 30067 ) % (self.categories[categoryID]["name"]),3000)
 
     def _scrap_thumb_launcher(self, launcherID):
         keyboard = xbmc.Keyboard(self.launchers[launcherID]["name"], __language__( 30036 ))
@@ -569,12 +671,19 @@ class Main:
             self._scrap_thumb_launcher_algo(launcherID, keyboard.getText())
         xbmc.executebuiltin("Container.Update")
 
+    def _scrap_thumb_category(self, categoryID):
+        keyboard = xbmc.Keyboard(self.categories[categoryID]["name"], __language__( 30036 ))
+        keyboard.doModal()
+        if (keyboard.isConfirmed()):
+            self._scrap_thumb_category_algo(categoryID, keyboard.getText())
+        xbmc.executebuiltin("Container.Update")
+
     def _scrap_fanart_rom_algo(self, launcher, rom, title):
-        xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000)" % (__language__( 30000 ), __language__( 30071 ) % (self.launchers[launcher]["roms"][rom]["name"],(self.settings[ "fanarts_scraper" ]).encode('utf-8','ignore'))))
+        xbmc_notify(__language__( 30000 ), __language__( 30071 ) % (self.launchers[launcher]["roms"][rom]["name"],self.settings[ "fanarts_scraper" ].encode('utf-8','ignore')),300000)
         full_fanarts = self._get_fanarts_list(self.launchers[launcher]["roms"][rom]["gamesys"],title,self.settings[ "fanart_image_size" ])
         if full_fanarts:
             nb_images = len(full_fanarts)
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30072 ) % (nb_images,self.launchers[launcher]["roms"][rom]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30072 ) % (nb_images,self.launchers[launcher]["roms"][rom]["name"]),3000)
             full_fanarts.insert(0,(self.launchers[launcher]["roms"][rom]["fanart"],self.launchers[launcher]["roms"][rom]["fanart"],__language__( 30068 )))
             self.image_url = MyDialog(full_fanarts)
             if ( self.image_url ):
@@ -594,27 +703,55 @@ class Main:
                                     file_path = filename.replace("."+filename.split(".")[-1], img_ext)
                                 else:
                                     file_path = os.path.join(os.path.dirname(self.launchers[launcher]["fanartpath"]),os.path.basename(filename.replace("."+filename.split(".")[-1], img_ext)))
-                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000)" % (__language__( 30000 ), __language__( 30074 )))
+                            xbmc_notify(__language__( 30000 ), __language__( 30074 ),300000)
                             try:
-                                urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
-                                h = urllib.urlretrieve(img_url,file_path)
-                                filetype = imghdr.what(file_path)
-                                if str(filetype) == 'None':
-                                    raise NameError('Bad File')
+                                download_img(img_url,file_path)
+                                if ( self.launchers[launcher]["roms"][rom]["fanart"] != "" ):
+                                    _update_cache(file_path)
                                 self.launchers[launcher]["roms"][rom]["fanart"] = file_path
                                 self._save_launchers()
-                                _update_cache(file_path)
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30075 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
                             except socket.timeout:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30080 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30081 ),3000)
                             except exceptions.IOError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30064 ) % self.launchers[launcher]["roms"][rom]["name"]))
-                            except exceptions.NameError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30081 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30064 ) % self.launchers[launcher]["roms"][rom]["name"],3000)
                     else:
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcher]["roms"][rom]["name"])))
+                        xbmc_notify(__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcher]["roms"][rom]["name"]),3000)
         else:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcher]["roms"][rom]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcher]["roms"][rom]["name"]),3000)
+
+    def _scrap_fanart_category_algo(self, categoryID, title):
+        xbmc_notify(__language__( 30000 ), __language__( 30071 ) % (self.categories[categoryID]["name"],(self.settings[ "fanarts_scraper" ]).encode('utf-8','ignore')),300000)
+        covers = self._get_fanarts_list("",title,self.settings[ "fanart_image_size" ])
+        if covers:
+            nb_images = len(covers)
+            xbmc_notify(__language__( 30000 ), __language__( 30072 ) % (nb_images,self.categories[categoryID]["name"]),3000)
+            covers.insert(0,(self.categories[categoryID]["fanart"],self.categories[categoryID]["fanart"],__language__( 30068 )))
+            self.image_url = MyDialog(covers)
+            if ( self.image_url ):
+                if (not self.image_url == self.categories[categoryID]["fanart"]):
+                    img_url = self._get_fanart(self.image_url)
+                    if ( img_url != '' ):
+                        img_ext = os.path.splitext(img_url)[-1][0:4]
+                        if ( img_ext != '' ):
+                            filename = self.categories[categoryID]["name"]
+                            file_path = os.path.join(DEFAULT_FANART_PATH,os.path.basename(self.categories[categoryID]["name"])+'_fanart'+img_ext)
+                            xbmc_notify(__language__( 30000 ), __language__( 30074 ),300000)
+                            try:
+                                download_img(img_url,file_path)
+                                if ( self.categories[categoryID]["fanart"] != "" ):
+                                    _update_cache(file_path)
+                                self.categories[categoryID]["fanart"] = file_path
+                                self._save_launchers()
+                                xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
+                            except socket.timeout:
+                                xbmc_notify(__language__( 30000 ), __language__( 30081 ),3000)
+                            except exceptions.IOError:
+                                xbmc_notify(__language__( 30000 ), __language__( 30064 ) % self.categories[categoryID]["name"],3000)
+                    else:
+                        xbmc_notify(__language__( 30000 ), __language__( 30073 ) % (self.categories[categoryID]["name"]),3000)
+        else:
+            xbmc_notify(__language__( 30000 ), __language__( 30073 ) % (self.categories[categoryID]["name"]),3000)
 
     def _scrap_fanart_rom(self, launcher, rom):
         if ( self.launchers[launcher]["application"].lower().find('mame') > 0 ) or ( self.settings[ "fanarts_scraper" ] == 'arcadeHITS' ):
@@ -628,13 +765,13 @@ class Main:
         xbmc.executebuiltin("Container.Update")
 
     def _scrap_fanart_launcher_algo(self, launcherID, title):
-        xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000)" % (__language__( 30000 ), __language__( 30071 ) % (self.launchers[launcherID]["name"],(self.settings[ "fanarts_scraper" ]).encode('utf-8','ignore'))))
+        xbmc_notify(__language__( 30000 ), __language__( 30071 ) % (self.launchers[launcherID]["name"],(self.settings[ "fanarts_scraper" ]).encode('utf-8','ignore')),300000)
         xbmc.executebuiltin( "ActivateWindow(busydialog)" )
         covers = self._get_fanarts_list(self.launchers[launcherID]["gamesys"],title,self.settings[ "fanart_image_size" ])
         if covers:
             nb_images = len(covers)
             xbmc.executebuiltin( "Dialog.Close(busydialog)" )
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30072 ) % (nb_images,self.launchers[launcherID]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30072 ) % (nb_images,self.launchers[launcherID]["name"]),3000)
             covers.insert(0,(self.launchers[launcherID]["fanart"],self.launchers[launcherID]["fanart"],__language__( 30068 )))
             self.image_url = MyDialog(covers)
             if ( self.image_url ):
@@ -650,34 +787,36 @@ class Main:
                                 if (self.settings[ "launcher_fanart_path" ] == "" ):
                                     self.settings[ "launcher_fanart_path" ] = DEFAULT_FANART_PATH
                                 file_path = os.path.join(self.settings[ "launcher_fanart_path" ],os.path.basename(self.launchers[launcherID]["application"])+'_fanart'+img_ext)
-                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 300000)" % (__language__( 30000 ), __language__( 30074 )))
+                            xbmc_notify(__language__( 30000 ), __language__( 30074 ),300000)
                             try:
-                                urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
-                                h = urllib.urlretrieve(img_url,file_path)
-                                filetype = imghdr.what(file_path)
-                                if str(filetype) == 'None':
-                                    raise NameError('Bad File')
+                                download_img(img_url,file_path)
+                                if ( self.launchers[launcherID]["fanart"] != "" ):
+                                    _update_cache(file_path)
                                 self.launchers[launcherID]["fanart"] = file_path
                                 self._save_launchers()
-                                _update_cache(file_path)
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30075 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
                             except socket.timeout:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30080 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30081 ),3000)
                             except exceptions.IOError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30064 ) % self.launchers[launcherID]["name"]))
-                            except exceptions.NameError:
-                                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30081 )))
+                                xbmc_notify(__language__( 30000 ), __language__( 30064 ) % self.launchers[launcherID]["name"],3000)
                     else:
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcherID]["name"])))
+                        xbmc_notify(__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcherID]["name"]),3000)
         else:
             xbmc.executebuiltin( "Dialog.Close(busydialog)" )
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcherID]["name"])))
+            xbmc_notify(__language__( 30000 ), __language__( 30073 ) % (self.launchers[launcherID]["name"]),3000)
 
     def _scrap_fanart_launcher(self, launcherID):
         keyboard = xbmc.Keyboard(self.launchers[launcherID]["name"], __language__( 30036 ))
         keyboard.doModal()
         if (keyboard.isConfirmed()):
             self._scrap_fanart_launcher_algo(launcherID, keyboard.getText())
+        xbmc.executebuiltin("Container.Update")
+
+    def _scrap_fanart_category(self, categoryID):
+        keyboard = xbmc.Keyboard(self.categories[categoryID]["name"], __language__( 30036 ))
+        keyboard.doModal()
+        if (keyboard.isConfirmed()):
+            self._scrap_fanart_category_algo(categoryID, keyboard.getText())
         xbmc.executebuiltin("Container.Update")
 
     def _scrap_rom_algo(self, launcher, rom, title):
@@ -699,7 +838,7 @@ class Main:
                     self.launchers[launcher]["roms"][rom]["studio"] = gamedata["studio"]
                     self.launchers[launcher]["roms"][rom]["plot"] = gamedata["plot"]
             else:
-                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30076 )))
+                xbmc_notify(__language__( 30000 ), __language__( 30076 ),3000)
     
     def _scrap_rom(self, launcher, rom):
         # Edition of the rom name
@@ -735,6 +874,7 @@ class Main:
         if (os.path.isfile(nfo_file)):
             f = open(nfo_file, 'r')
             item_nfo = f.read().replace('\r','').replace('\n','')
+            f.close()
             item_title = re.findall( "<title>(.*?)</title>", item_nfo )
             item_platform = re.findall( "<platform>(.*?)</platform>", item_nfo )
             item_year = re.findall( "<year>(.*?)</year>", item_nfo )
@@ -748,12 +888,12 @@ class Main:
             if len(item_genre) > 0 : self.launchers[launcher]["roms"][rom]["genre"] = item_genre[0]
             if len(item_plot) > 0 : self.launchers[launcher]["roms"][rom]["plot"] = item_plot[0].replace('&quot;','"')
             self._save_launchers()
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30083 ) % os.path.basename(nfo_file)))
+            xbmc_notify(__language__( 30000 ), __language__( 30083 ) % os.path.basename(nfo_file),3000)
         else:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30082 ) % os.path.basename(nfo_file)))
+            xbmc_notify(__language__( 30000 ), __language__( 30082 ) % os.path.basename(nfo_file),3000)
 
     def _export_rom_nfo(self, launcher, rom):
-        nfo_file=os.path.splitext(self.launchers[launcher]["roms"][rom]["filename"].decode(sys.getfilesystemencoding()))[0]+".nfo"
+        nfo_file=os.path.splitext(self.launchers[launcher]["roms"][rom]["filename"].decode(get_encoding()))[0]+".nfo"
         if (os.path.isfile(nfo_file)):
             shutil.move( nfo_file, nfo_file+".tmp" )
             destination= open( nfo_file, "w" )
@@ -779,19 +919,13 @@ class Main:
             source.close()
             destination.close()
             os.remove(nfo_file+".tmp")
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30087 ) % os.path.basename(nfo_file).encode('utf8','ignore')))
+            xbmc_notify(__language__( 30000 ), __language__( 30087 ) % os.path.basename(nfo_file).encode('utf8','ignore'),3000)
         else:
+            nfo_content = "<game>\n\t<title>"+self.launchers[launcher]["roms"][rom]["name"]+"</title>\n\t<platform>"+self.launchers[launcher]["roms"][rom]["gamesys"]+"</platform>\n\t<year>"+self.launchers[launcher]["roms"][rom]["release"]+"</year>\n\t<publisher>"+self.launchers[launcher]["roms"][rom]["studio"]+"</publisher>\n\t<genre>"+self.launchers[launcher]["roms"][rom]["genre"]+"</genre>\n\t<plot>"+self.launchers[launcher]["roms"][rom]["plot"]+"</plot>\n</game>\n"
             usock = open( nfo_file, 'w' )
-            usock.write("<game>\n")
-            usock.write("\t<title>"+self.launchers[launcher]["roms"][rom]["name"]+"</title>\n")
-            usock.write("\t<platform>"+self.launchers[launcher]["roms"][rom]["gamesys"]+"</platform>\n")
-            usock.write("\t<year>"+self.launchers[launcher]["roms"][rom]["release"]+"</year>\n")
-            usock.write("\t<publisher>"+self.launchers[launcher]["roms"][rom]["studio"]+"</publisher>\n")
-            usock.write("\t<genre>"+self.launchers[launcher]["roms"][rom]["genre"]+"</genre>\n")
-            usock.write("\t<plot>"+self.launchers[launcher]["roms"][rom]["plot"]+"</plot>\n")
-            usock.write("</game>\n")
+            usock.write(nfo_content)
             usock.close()
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30086 ) % os.path.basename(nfo_file).encode('utf8','ignore')))
+            xbmc_notify(__language__( 30000 ), __language__( 30086 ) % os.path.basename(nfo_file).encode('utf8','ignore'),3000)
 
     def _add_roms(self, launcher):
         dialog = xbmcgui.Dialog()
@@ -804,17 +938,157 @@ class Main:
         xbmc.executebuiltin("Container.Refresh")
 
 
+    def _modify_category(self, categoryID):
+        dialog = xbmcgui.Dialog()
+        type2 = dialog.select(__language__( 30344 ),[__language__( 30306 ) % self.categories[categoryID]["name"],__language__( 30310 ) % self.categories[categoryID]["genre"],__language__( 30328 ) % self.categories[categoryID]["plot"]])
+        if (type2 == 0 ):
+            # Edition of the category name
+            keyboard = xbmc.Keyboard(self.categories[categoryID]["name"], __language__( 30037 ))
+            keyboard.doModal()
+            if (keyboard.isConfirmed()):
+                title = keyboard.getText()
+                if ( title == "" ):
+                    title = self.categories[categoryID]["name"]
+                self.categories[categoryID]["name"] = title.rstrip()
+                self._save_launchers()
+        if (type2 == 1 ):
+            # Edition of the category genre
+            keyboard = xbmc.Keyboard(self.categories[categoryID]["genre"], __language__( 30040 ))
+            keyboard.doModal()
+            if (keyboard.isConfirmed()):
+                self.categories[categoryID]["genre"] = keyboard.getText()
+                self._save_launchers()
+        if (type2 == 2 ):
+            # Import category description
+            text_file = xbmcgui.Dialog().browse(1,__language__( 30080 ),"files",".txt|.dat", False, False)
+            if ( os.path.isfile(text_file) == True ):
+                text_plot = open(text_file, 'r')
+                self.categories[categoryID]["plot"] = text_plot.read()
+                text_plot.close()
+                self._save_launchers()
+
+    def _edit_category(self, categoryID):
+        dialog = xbmcgui.Dialog()
+        if (self.categories[categoryID]["finished"] != "true"):
+            finished_display = __language__( 30339 )
+        else:
+            finished_display = __language__( 30340 )
+        type = dialog.select(__language__( 30300 ) % self.categories[categoryID]["name"], [__language__( 30301 ),__language__( 30302 ),__language__( 30303 ),finished_display,__language__( 30304 )])
+        if (type == 0 ):
+            self._modify_category(categoryID)
+        # Category Thumb menu option
+        if (type == 1 ):
+            dialog = xbmcgui.Dialog()
+            thumb_diag = __language__( 30312 ) % ( self.settings[ "thumbs_scraper" ] )
+            if ( self.settings[ "thumbs_scraper" ] == "Google" ):
+                thumb_diag = __language__( 30322 ) % ( self.settings[ "thumbs_scraper" ],self.settings[ "thumb_image_size_display" ].capitalize())
+            type2 = dialog.select(__language__( 30302 ), [thumb_diag,__language__( 30332 ),__language__( 30313 )])
+            if (type2 == 0 ):
+                self._scrap_thumb_category(categoryID)
+            if (type2 == 1 ):
+                # Import a category thumbnail image
+                image = xbmcgui.Dialog().browse(2,__language__( 30041 ),"files",".jpg|.jpeg|.gif|.png", True, False, DEFAULT_THUMB_PATH)
+                if (image):
+                    if (os.path.isfile(image)):
+                        img_ext = os.path.splitext(image)[-1][0:4]
+                        if ( img_ext != '' ):
+                            filename = self.categories[categoryID]["name"]
+                            file_path = os.path.join(DEFAULT_THUMB_PATH,os.path.basename(self.categories[categoryID]["name"])+'_thumb'+img_ext)
+                            if ( image != file_path ):
+                                try:
+                                    shutil.copy2( image.decode(get_encoding(),'ignore') , file_path.decode(get_encoding(),'ignore') )
+                                    if ( self.categories[categoryID]["thumb"] != "" ):
+                                        _update_cache(file_path)
+                                    self.categories[categoryID]["thumb"] = file_path
+                                    self._save_launchers()
+                                    xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
+                                except OSError:
+                                    xbmc_notify(__language__( 30000 ), __language__( 30063 ) % self.categories[categoryID]["name"],3000)
+            if (type2 == 2 ):
+                # Link to a category thumbnail image
+                if (self.categories[categoryID]["thumb"] == ""):
+                    imagepath = DEFAULT_THUMB_PATH
+                else:
+                    imagepath = self.categories[categoryID]["thumb"]
+                image = xbmcgui.Dialog().browse(2,__language__( 30041 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(imagepath))
+                if (image):
+                    if (os.path.isfile(image)):
+                        if ( self.categories[categoryID]["thumb"] != "" ):
+                            _update_cache(image)
+                        self.categories[categoryID]["thumb"] = image
+                        self._save_launchers()
+                        xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
+
+        # Launcher Fanart menu option
+        if (type == 2 ):
+            dialog = xbmcgui.Dialog()
+            fanart_diag = __language__( 30312 ) % ( self.settings[ "fanarts_scraper" ] )
+            if ( self.settings[ "fanarts_scraper" ] == "Google" ):
+                fanart_diag = __language__( 30322 ) % ( self.settings[ "fanarts_scraper" ],self.settings[ "fanart_image_size_display" ].capitalize())
+            type2 = dialog.select(__language__( 30303 ), [fanart_diag,__language__( 30332 ),__language__( 30313 )])
+            if (type2 == 0 ):
+                self._scrap_fanart_category(categoryID)
+            if (type2 == 1 ):
+                # Import a Category fanart image
+                image = xbmcgui.Dialog().browse(2,__language__( 30042 ),"files",".jpg|.jpeg|.gif|.png", True, False, DEFAULT_FANART_PATH)
+                if (image):
+                    if (os.path.isfile(image)):
+                        img_ext = os.path.splitext(image)[-1][0:4]
+                        if ( img_ext != '' ):
+                            filename = self.categories[categoryID]["name"]
+                            file_path = os.path.join(DEFAULT_FANART_PATH,os.path.basename(self.categories[categoryID]["name"])+'_fanart'+img_ext)
+                            if ( image != file_path ):
+                                try:
+                                    shutil.copy2( image.decode(get_encoding(),'ignore') , file_path.decode(get_encoding(),'ignore') )
+                                    if ( self.categories[categoryID]["fanart"] != "" ):
+                                        _update_cache(file_path)
+                                    self.categories[categoryID]["fanart"] = file_path
+                                    self._save_launchers()
+                                    xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
+                                except OSError:
+                                    xbmc_notify(__language__( 30000 ), __language__( 30064 ) % self.categories[categoryID]["name"],3000)
+            if (type2 == 2 ):
+                # Link to a category fanart image
+                if (self.categories[categoryID]["fanart"] == ""):
+                    imagepath = DEFAULT_FANART_PATH
+                else:
+                    imagepath = self.categories[categoryID]["fanart"]
+                image = xbmcgui.Dialog().browse(2,__language__( 30042 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(imagepath))
+                if (image):
+                    if (os.path.isfile(image)):
+                        if ( self.categories[categoryID]["fanart"] != "" ):
+                            _update_cache(image)
+                        self.categories[categoryID]["fanart"] = image
+                        self._save_launchers()
+                        xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
+
+        # Category status
+        if (type == 3 ):
+            if (self.categories[categoryID]["finished"] != "true"):
+                self.categories[categoryID]["finished"] = "true"
+            else:
+                self.categories[categoryID]["finished"] = "false"
+            self._save_launchers()
+
+        if (type == 4 ):
+            self._remove_category(categoryID)
+        if (type == -1 ):
+            self._save_launchers()
+
+        # Return to the category directory
+        xbmc.executebuiltin("Container.Refresh")
+
     def _edit_launcher(self, launcherID):
         dialog = xbmcgui.Dialog()
-        title=os.path.basename(self.launchers[launcherID]["application"])
-        if (self.launchers[launcherID]["finished"] == "false"):
+        title=os.path.basename(self.launchers[launcherID]["name"])
+        if (self.launchers[launcherID]["finished"] != "true"):
             finished_display = __language__( 30339 )
         else:
             finished_display = __language__( 30340 )
         if ( self.launchers[launcherID]["rompath"] == "" ):
-            type = dialog.select(__language__( 30300 ) % title, [__language__( 30338 ),__language__( 30301 ),__language__( 30302 ),__language__( 30303 ),finished_display,__language__( 30323 ),__language__( 30304 )])
+            type = dialog.select(__language__( 30300 ) % title, [__language__( 30338 ),__language__( 30301 ),__language__( 30302 ),__language__( 30303 ),__language__( 30342 ) % self.categories[self.launchers[launcherID]["category"]]['name'],finished_display,__language__( 30323 ),__language__( 30304 )])
         else:
-            type = dialog.select(__language__( 30300 ) % title, [__language__( 30338 ),__language__( 30301 ),__language__( 30302 ),__language__( 30303 ),finished_display,__language__( 30334 ),__language__( 30323 ),__language__( 30304 )])
+            type = dialog.select(__language__( 30300 ) % title, [__language__( 30338 ),__language__( 30301 ),__language__( 30302 ),__language__( 30303 ),__language__( 30342 ) % self.categories[self.launchers[launcherID]["category"]]['name'],finished_display,__language__( 30334 ),__language__( 30323 ),__language__( 30304 )])
         type_nb = 0
 
         # Scrap item (infos and images)
@@ -911,13 +1185,14 @@ class Main:
                                 file_path = os.path.join(self.settings[ "launcher_thumb_path" ],os.path.basename(self.launchers[launcherID]["application"])+'_thumb'+img_ext)
                             if ( image != file_path ):
                                 try:
-                                    shutil.copy2( image.decode(sys.getfilesystemencoding(),'ignore') , file_path.decode(sys.getfilesystemencoding(),'ignore') )
+                                    shutil.copy2( image.decode(get_encoding(),'ignore') , file_path.decode(get_encoding(),'ignore') )
+                                    if ( self.launchers[launcherID]["thumb"] != "" ):
+                                        _update_cache(file_path)
                                     self.launchers[launcherID]["thumb"] = file_path
                                     self._save_launchers()
-                                    _update_cache(file_path)
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30070 )))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
                                 except OSError:
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30063 ) % self.launchers[launcherID]["name"]))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30063 ) % self.launchers[launcherID]["name"],3000)
 
             if (type2 == 2 ):
                 # Link to a launcher thumbnail image
@@ -928,10 +1203,11 @@ class Main:
                 image = xbmcgui.Dialog().browse(2,__language__( 30041 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(imagepath))
                 if (image):
                     if (os.path.isfile(image)):
+                        if ( self.launchers[launcherID]["thumb"] != "" ):
+                            _update_cache(image)
                         self.launchers[launcherID]["thumb"] = image
                         self._save_launchers()
-                        _update_cache(image)
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30070 )))
+                        xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
 
         # Launcher Fanart menu option
         type_nb = type_nb+1
@@ -945,7 +1221,7 @@ class Main:
                 self._scrap_fanart_launcher(launcherID)
             if (type2 == 1 ):
                 # Import a Launcher fanart image
-                image = xbmcgui.Dialog().browse(2,__language__( 30041 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(self.launchers[launcherID]["fanartpath"]))
+                image = xbmcgui.Dialog().browse(2,__language__( 30042 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(self.launchers[launcherID]["fanartpath"]))
                 if (image):
                     if (os.path.isfile(image)):
                         img_ext = os.path.splitext(image)[-1][0:4]
@@ -959,13 +1235,14 @@ class Main:
                                 file_path = os.path.join(self.settings[ "launcher_fanart_path" ],os.path.basename(self.launchers[launcherID]["application"])+'_fanart'+img_ext)
                             if ( image != file_path ):
                                 try:
-                                    shutil.copy2( image.decode(sys.getfilesystemencoding(),'ignore') , file_path.decode(sys.getfilesystemencoding(),'ignore') )
+                                    shutil.copy2( image.decode(get_encoding(),'ignore') , file_path.decode(get_encoding(),'ignore') )
+                                    if ( self.launchers[launcherID]["fanart"] != "" ):
+                                        _update_cache(file_path)
                                     self.launchers[launcherID]["fanart"] = file_path
                                     self._save_launchers()
-                                    _update_cache(file_path)
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30070 )))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30070 ),3000)
                                 except OSError:
-                                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30064 ) % self.launchers[launcherID]["name"]))
+                                    xbmc_notify(__language__( 30000 ), __language__( 30064 ) % self.launchers[launcherID]["name"],3000)
             if (type2 == 2 ):
                 # Link to a launcher fanart image
                 if (self.launchers[launcherID]["fanart"] == ""):
@@ -975,14 +1252,32 @@ class Main:
                 image = xbmcgui.Dialog().browse(2,__language__( 30042 ),"files",".jpg|.jpeg|.gif|.png", True, False, os.path.join(imagepath))
                 if (image):
                     if (os.path.isfile(image)):
+                        if ( self.launchers[launcherID]["fanart"] != "" ):
+                            _update_cache(image)
                         self.launchers[launcherID]["fanart"] = image
                         self._save_launchers()
-                        _update_cache(image)
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30075 )))
+                        xbmc_notify(__language__( 30000 ), __language__( 30075 ),3000)
 
+        # Launcher's change category
         type_nb = type_nb+1
         if (type == type_nb ):
-            if (self.launchers[launcherID]["finished"] == "false"):
+            current_category = self.launchers[launcherID]["category"]
+            dialog = xbmcgui.Dialog()
+            categories_id = []
+            categories_name = []
+            for key in self.categories:
+                categories_id.append(self.categories[key]['id'])
+                categories_name.append(self.categories[key]['name'])
+            selected_cat = dialog.select(__language__( 30114 ), categories_name)
+            if (not selected_cat == -1 ):
+                self.launchers[launcherID]["category"] = categories_id[selected_cat]
+                self._save_launchers()
+                xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s)" % (self._path, categories_id[selected_cat]))
+
+        # Launcher status
+        type_nb = type_nb+1
+        if (type == type_nb ):
+            if (self.launchers[launcherID]["finished"] != "true"):
                 self.launchers[launcherID]["finished"] = "true"
             else:
                 self.launchers[launcherID]["finished"] = "false"
@@ -1036,7 +1331,7 @@ class Main:
             # Launcher application path menu option
             type2_nb = 0
             if (type2 == type2_nb ):
-                app = xbmcgui.Dialog().browse(1,__language__( 30023 ),"files",filter, False, False, self.launchers[launcherID]["application"])
+                app = xbmcgui.Dialog().browse(1,__language__( 30023 ),"files","", False, False, self.launchers[launcherID]["application"])
                 self.launchers[launcherID]["application"] = app
 
             # Edition of the launcher arguments
@@ -1137,7 +1432,7 @@ class Main:
                 self.launchers[launcherID]["studio"] = gamedata["studio"]
                 self.launchers[launcherID]["plot"] = gamedata["plot"]
         else:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30076 )))
+            xbmc_notify(__language__( 30000 ), __language__( 30076 ),3000)
 
     def _scrap_launcher(self, launcherID):
         # Edition of the launcher name
@@ -1182,10 +1477,11 @@ class Main:
             self.launchers[launcherID]["studio"] = item_publisher[0]
             self.launchers[launcherID]["genre"] = item_genre[0]
             self.launchers[launcherID]["plot"] = item_plot[0].replace('&quot;','"')
+            f.close()
             self._save_launchers()
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30083 ) % os.path.basename(nfo_file)))
+            xbmc_notify(__language__( 30000 ), __language__( 30083 ) % os.path.basename(nfo_file),3000)
         else:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30082 ) % os.path.basename(nfo_file)))
+            xbmc_notify(__language__( 30000 ), __language__( 30082 ) % os.path.basename(nfo_file),3000)
 
     def _export_items_list_nfo(self, launcherID):
         for rom in self.launchers[launcherID]["roms"].iterkeys():
@@ -1225,73 +1521,88 @@ class Main:
             source.close()
             destination.close()
             os.remove(nfo_file+".tmp")
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30087 ) % os.path.basename(nfo_file)))
+            xbmc_notify(__language__( 30000 ), __language__( 30087 ) % os.path.basename(nfo_file),3000)
         else:
+            nfo_content = "<launcher>\n\t<title>"+self.launchers[launcherID]["name"]+"</title>\n\t<platform>"+self.launchers[launcherID]["gamesys"]+"</platform>\n\t<year>"+self.launchers[launcherID]["release"]+"</year>\n\t<publisher>"+self.launchers[launcherID]["studio"]+"</publisher>\n\t<genre>"+self.launchers[launcherID]["genre"]+"</genre>\n\t<plot>"+self.launchers[launcherID]["plot"]+"</plot>\n</launcher>\n"
             usock = open( nfo_file, 'w' )
-            usock.write("<game>\n")
-            usock.write("\t<title>"+self.launchers[launcherID]["name"]+"</title>\n")
-            usock.write("\t<platform>"+self.launchers[launcherID]["gamesys"]+"</platform>\n")
-            usock.write("\t<year>"+self.launchers[launcherID]["release"]+"</year>\n")
-            usock.write("\t<publisher>"+self.launchers[launcherID]["studio"]+"</publisher>\n")
-            usock.write("\t<genre>"+self.launchers[launcherID]["genre"]+"</genre>\n")
-            usock.write("\t<plot>"+self.launchers[launcherID]["plot"]+"</plot>\n")
-            usock.write("</game>\n")
+            usock.write(nfo_content)
             usock.close()
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30086 ) % os.path.basename(nfo_file)))
+            xbmc_notify(__language__( 30000 ), __language__( 30086 ) % os.path.basename(nfo_file),3000)
 
     def _run_launcher(self, launcherID):
         if (self.launchers.has_key(launcherID)):
             launcher = self.launchers[launcherID]
             apppath = os.path.dirname(launcher["application"])
-            arguments = launcher["args"].replace("%apppath%" , apppath).replace("%APPPATH%" , apppath)
-            if ( os.path.basename(launcher["application"]).lower().replace(".exe" , "") == "xbmc" ):
-                xbmc.executebuiltin('XBMC.' + launcher["args"])
+            if ( os.path.basename(launcher["application"]).lower().replace(".exe" , "") == "xbmc" ) or ("xbmc-fav-" in launcher["application"]) or ("xbmc-sea-" in launcher["application"]):
+                xbmc.executebuiltin('XBMC.%s' % launcher["args"])
             else:
-                if ( xbmc.Player().isPlaying() ):
-                    if ( self.settings[ "media_state" ] == "0" ):
-                        xbmc.executebuiltin('PlayerControl(Stop)')
-                    if ( self.settings[ "media_state" ] == "1" ):
-                        xbmc.executebuiltin('PlayerControl(Play)')
-                    xbmc.sleep(2*self.settings[ "start_tempo" ])
-                if (launcher["minimize"] == "true"):
-                    _toogle_fullscreen()
-                if ( self.settings[ "launcher_notification" ] ):
-                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30034 ) % launcher["name"]))
-                xbmc.sleep(self.settings[ "start_tempo" ])
-                if (os.environ.get( "OS", "xbox" ) == "xbox"):
-                    xbmc.executebuiltin('XBMC.Runxbe(' + launcher["application"] + ')')
-                else:
-                    if (sys.platform == 'win32'):
-                        if ( launcher["application"].split(".")[-1] == "lnk" ):
-                            os.system("start \"\" \"%s\"" % (launcher["application"]))
-                        else:
-                            if ( launcher["application"].split(".")[-1] == "bat" ):
-                                info = subprocess_hack.STARTUPINFO()
-                                info.dwFlags = 1
-                                if ( self.settings[ "show_batch" ] ):
-                                    info.wShowWindow = 5
-                                else:
-                                    info.wShowWindow = 0
-                            else:
-                                info = None
-                            startproc = subprocess_hack.Popen(r'%s %s' % (launcher["application"], arguments), cwd=apppath, startupinfo=info)
-                            startproc.wait()
-                    elif (sys.platform.startswith('linux')):
-                        if ( self.settings[ "lirc_state" ] ):
-                            xbmc.executebuiltin('LIRC.stop')
-                        os.system("\"%s\" %s " % (launcher["application"], arguments))
-                        if ( self.settings[ "lirc_state" ] ):
-                            xbmc.executebuiltin('LIRC.start')
-                    elif (sys.platform.startswith('darwin')):
-                        os.system("\"%s\" %s " % (launcher["application"], arguments))
+                if ( os.path.exists(apppath) ) :
+                    arguments = launcher["args"].replace("%apppath%" , apppath).replace("%APPPATH%" , apppath)
+                    if ( self.settings[ "media_state" ] != "2" ):
+                        if ( xbmc.Player().isPlaying() ):
+                            if ( self.settings[ "media_state" ] == "0" ):
+                                xbmc.Player().stop()
+                            if ( self.settings[ "media_state" ] == "1" ):
+                                xbmc.Player().pause()
+                            xbmc.sleep(self.settings[ "start_tempo" ]+100)
+                            try:
+                                xbmc.audioSuspend()
+                            except:
+                                pass
+                    if (launcher["minimize"] == "true"):
+                        _toogle_fullscreen()
+                    if ( self.settings[ "launcher_notification" ] ):
+                        xbmc_notify(__language__( 30000 ), __language__( 30034 ) % launcher["name"],3000)
+                    try:
+                        xbmc.enableNavSounds(False)                                 
+                    except:
+                        pass
+                    xbmc.sleep(self.settings[ "start_tempo" ])
+                    if (os.environ.get( "OS", "xbox" ) == "xbox"):
+                        xbmc.executebuiltin('XBMC.Runxbe(' + launcher["application"] + ')')
                     else:
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30609 )))
-                xbmc.sleep(self.settings[ "start_tempo" ])
-                if (launcher["minimize"] == "true"):
-                    _toogle_fullscreen()
-                if ( self.settings[ "media_state" ] == "1" ):
-                    xbmc.sleep(2*self.settings[ "start_tempo" ])
-                    xbmc.executebuiltin('PlayerControl(Play)')
+                        if (sys.platform == 'win32'):
+                            if ( launcher["application"].split(".")[-1] == "lnk" ):
+                                os.system("start \"\" \"%s\"" % (launcher["application"]))
+                            else:
+                                if ( launcher["application"].split(".")[-1] == "bat" ):
+                                    info = subprocess_hack.STARTUPINFO()
+                                    info.dwFlags = 1
+                                    if ( self.settings[ "show_batch" ] ):
+                                        info.wShowWindow = 5
+                                    else:
+                                        info.wShowWindow = 0
+                                else:
+                                    info = None
+                                startproc = subprocess_hack.Popen(r'%s %s' % (launcher["application"], arguments), cwd=apppath, startupinfo=info)
+                                startproc.wait()
+                        elif (sys.platform.startswith('linux')):
+                            if ( self.settings[ "lirc_state" ] ):
+                                xbmc.executebuiltin('LIRC.stop')
+                            os.system("\"%s\" %s " % (launcher["application"], arguments))
+                            if ( self.settings[ "lirc_state" ] ):
+                                xbmc.executebuiltin('LIRC.start')
+                        elif (sys.platform.startswith('darwin')):
+                            os.system("\"%s\" %s " % (launcher["application"], arguments))
+                        else:
+                            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30609 ),3000)
+                    xbmc.sleep(self.settings[ "start_tempo" ])
+                    if (launcher["minimize"] == "true"):
+                        _toogle_fullscreen()
+                    try:
+                        xbmc.enableNavSounds(True)                            
+                    except:
+                        pass
+                    if ( self.settings[ "media_state" ] != "2" ):
+                        try:
+                            xbmc.audioResume()
+                        except:
+                            pass
+                        if ( self.settings[ "media_state" ] == "1" ):
+                            xbmc.sleep(self.settings[ "start_tempo" ]+100)
+                            xbmc.Player().play()
+                else:
+                    xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30611 ) % os.path.basename(launcher["application"]),3000)
 
     def _get_settings( self ):
         # get the users preference settings
@@ -1314,9 +1625,9 @@ class Main:
         self.settings[ "fanarts_scraper" ] = __settings__.getSetting( "fanarts_scraper" )
         self.settings[ "game_region" ] = ['All','EU','JP','US'][int(__settings__.getSetting('game_region'))]
         self.settings[ "display_game_region" ] = [__language__( 30136 ),__language__( 30144 ),__language__( 30145 ),__language__( 30146 )][int(__settings__.getSetting('game_region'))]
-        self.settings[ "thumb_image_size" ] = ['','isz:i','isz:s','isz:m','isz:l','isz:ex,iszw:1280,iszh:720','isz:ex,iszw:1920,isz:iszh:1080','isz:ex,iszw:3840,iszh:2160'][int(__settings__.getSetting('thumb_image_size'))]
+        self.settings[ "thumb_image_size" ] = ['','icon','small','medium','large','xlarge','xxlarge','huge'][int(__settings__.getSetting('thumb_image_size'))]
         self.settings[ "thumb_image_size_display" ] = [__language__( 30136 ),__language__( 30137 ),__language__( 30138 ),__language__( 30139 ),__language__( 30140 ),__language__( 30141 ),__language__( 30142 ),__language__( 30143 )][int(__settings__.getSetting('thumb_image_size'))]
-        self.settings[ "fanart_image_size" ] = ['','isz:i','isz:s','isz:m','isz:l','isz:ex,iszw:1280,iszh:720','isz:ex,iszw:1920,iszh:1080','isz:ex,iszw:3840,iszh:2160'][int(__settings__.getSetting('fanart_image_size'))]
+        self.settings[ "fanart_image_size" ] = ['','icon','small','medium','large','xlarge','xxlarge','huge'][int(__settings__.getSetting('fanart_image_size'))]
         self.settings[ "fanart_image_size_display" ] = [__language__( 30136 ),__language__( 30137 ),__language__( 30138 ),__language__( 30139 ),__language__( 30140 ),__language__( 30141 ),__language__( 30142 ),__language__( 30143 )][int(__settings__.getSetting('fanart_image_size'))]
         self.settings[ "launcher_thumb_path" ] = __settings__.getSetting( "launcher_thumb_path" )
         self.settings[ "launcher_fanart_path" ] = __settings__.getSetting( "launcher_fanart_path" )
@@ -1332,10 +1643,12 @@ class Main:
         self.settings[ "auto_backup" ] = ( __settings__.getSetting( "auto_backup" ) == "true" )
         self.settings[ "nb_backup_files" ] = int(round(float(__settings__.getSetting( "nb_backup_files" ))))
         self.settings[ "show_log" ] = ( __settings__.getSetting( "show_log" ) == "true" )
+        self.settings[ "hide_default_cat" ] = ( __settings__.getSetting( "hide_default_cat" ) == "true" )
+        self.settings[ "open_default_cat" ] = ( __settings__.getSetting( "open_default_cat" ) == "true" )
 
     def _print_log(self,string):
         if (self.settings[ "show_log" ]):
-            print "[ALA] "+string
+            print __language__( 30744 )+": "+string
 
     def _get_scrapers( self ):
         # get the users gamedata scrapers preference
@@ -1360,122 +1673,154 @@ class Main:
             if (launcher["roms"].has_key(romName)):
                 rom = self.launchers[launcherID]["roms"][romName]
                 romfile = os.path.basename(rom["filename"])
-                apppath = os.path.dirname(launcher["application"])
+                if ( rom["altapp"] != "" ):
+                    application = rom["altapp"]
+                else:
+                    application = launcher["application"]
+                apppath = os.path.dirname(application)
                 rompath = os.path.dirname(rom["filename"])
                 romname = os.path.splitext(romfile)[0]
+    
+                if ( os.path.exists(apppath) ) :
+                    if ( os.path.exists(rompath) ) :
+                        files = []
+                        filesnames = []
+                        ext3s = ['.cd1', '-cd1', '_cd1', ' cd1']
+                        for ext3 in ext3s:
+                            cleanromname = re.sub('(\[.*?\]|\{.*?\}|\(.*?\))', '', romname)
+                            if ( cleanromname.lower().find(ext3) > -1 ):
+                                temprompath = os.path.dirname(rom["filename"])
+                                try:
+                                    filesnames = os.listdir(temprompath)
+                                except:
+                                    xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30610 ),3000)
+                                namestem = cleanromname[:-len(ext3)]
 
-                files = []
-                filesnames = []
-                ext3s = ['.cd1', '-cd1', '_cd1', ' cd1']
-                for ext3 in ext3s:
-                    cleanromname = re.sub('(\[.*?\]|\{.*?\}|\(.*?\))', '', romname)
-                    if ( cleanromname.lower().find(ext3) > -1 ):
-                        temprompath = os.path.dirname(rom["filename"])
-                        try:
-                            filesnames = os.listdir(temprompath)
-                        except:
-                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30610 )))
-                        namestem = cleanromname[:-len(ext3)]
-
-                        for filesname in filesnames:
-                            altname=re.findall('\{.*?\}',filesname)
-                            searchname = re.sub('(\[.*?\]|\{.*?\}|\(.*?\))', '', filesname)
-                            if searchname[0:len(namestem)] == namestem and searchname[len(namestem):len(namestem)+len(ext3) - 1]  == ext3[:-1]:
-                                for romext in launcher["romext"].split("|"):
-                                    if searchname[-len(romext):].lower() == romext.lower() :
-                                        Discnum = searchname[(len(namestem)+len(ext3)-1):searchname.rfind(".")]
-                                        try:
-                                            int(Discnum)
-                                            if not altname:
-                                                files.append([Discnum, xbmc.getLocalizedString(427)+" "+Discnum, os.path.join(os.path.dirname(rom["filename"]),filesname)])
-                                            else:
-                                                files.append([Discnum, altname[0][1:-1], os.path.join(os.path.dirname(rom["filename"]),filesname)])
-                                        except:
-                                            pass
-                        if len(files) > 0:
-                            files.sort(key=lambda x: int(x[0]))
-                            discs = []
-                            for file in files:
-                                discs.append(file[1])
-                            dialog = xbmcgui.Dialog()
-                            type3 = dialog.select("%s:" % __language__( 30035 ), discs)
-                            if type3 > -1 :
-                                myresult = files[type3]
-                                rom["filename"] = myresult[2]
-                                romfile = os.path.basename(rom["filename"])
-                                rompath = os.path.dirname(rom["filename"])
-                                romname = os.path.splitext(romfile)[0]
-                            else:
-                                return ""
-
-                arguments = launcher["args"]
-                arguments = arguments.replace("%rom%" , rom["filename"]).replace("%ROM%" , rom["filename"])
-                arguments = arguments.replace("%romfile%" , romfile).replace("%ROMFILE%" , romfile)
-                arguments = arguments.replace("%romname%" , romname).replace("%ROMNAME%" , romname)
-                arguments = arguments.replace("%rombasename%" , base_filename(romname)).replace("%ROMBASENAME%" , base_filename(romname))
-                arguments = arguments.replace("%apppath%" , apppath).replace("%APPPATH%" , apppath)
-                arguments = arguments.replace("%rompath%" , rompath).replace("%ROMPATH%" , rompath)
-                arguments = arguments.replace("%romtitle%" , rom["name"]).replace("%ROMTITLE%" , rom["name"])
-                arguments = arguments.replace("%romspath%" , launcher["rompath"]).replace("%ROMSPATH%" , launcher["rompath"])
-
-                if ( os.path.basename(launcher["application"]).lower().replace(".exe" , "") == "xbmc" ):
-                    xbmc.executebuiltin('XBMC.' + arguments)
-                else:
-                    if ( xbmc.Player().isPlaying() ):
-                        if ( self.settings[ "media_state" ] == "0" ):
-                            xbmc.executebuiltin('PlayerControl(Stop)')
-                        if ( self.settings[ "media_state" ] == "1" ):
-                            xbmc.executebuiltin('PlayerControl(Play)')
-                        xbmc.sleep(2*self.settings[ "start_tempo" ])
-                    if (launcher["minimize"] == "true"):
-                        _toogle_fullscreen()
-                    if ( self.settings[ "launcher_notification" ] ):
-                        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30034 ) % rom["name"]))
-                    xbmc.sleep(self.settings[ "start_tempo" ])
-                    if (os.environ.get( "OS", "xbox" ) == "xbox"):
-                        f=open(SHORTCUT_FILE, "wb")
-                        f.write("<shortcut>\n")
-                        f.write("    <path>" + launcher["application"] + "</path>\n")
-                        f.write("    <custom>\n")
-                        f.write("       <game>" + rom["filename"] + "</game>\n")
-                        f.write("    </custom>\n")
-                        f.write("</shortcut>\n")
-                        f.close()
-                        xbmc.executebuiltin('XBMC.Runxbe(' + SHORTCUT_FILE + ')')
-                    else:
-                        if (sys.platform == 'win32'):
-                            if ( launcher["lnk"] == "true" ) and ( launcher["romext"] == "lnk" ):
-                                os.system("start \"\" \"%s\"" % (arguments))
-                            else:
-                                if ( launcher["application"].split(".")[-1] == "bat" ):
-                                    info = subprocess_hack.STARTUPINFO()
-                                    info.dwFlags = 1
-                                    if ( self.settings[ "show_batch" ] ):
-                                        info.wShowWindow = 5
+                                for filesname in filesnames:
+                                    altname=re.findall('\{.*?\}',filesname)
+                                    searchname = re.sub('(\[.*?\]|\{.*?\}|\(.*?\))', '', filesname)
+                                    if searchname[0:len(namestem)] == namestem and searchname[len(namestem):len(namestem)+len(ext3) - 1]  == ext3[:-1]:
+                                        for romext in launcher["romext"].split("|"):
+                                            if searchname[-len(romext):].lower() == romext.lower() :
+                                                Discnum = searchname[(len(namestem)+len(ext3)-1):searchname.rfind(".")]
+                                                try:
+                                                    int(Discnum)
+                                                    if not altname:
+                                                        files.append([Discnum, xbmc.getLocalizedString(427)+" "+Discnum, os.path.join(os.path.dirname(rom["filename"]),filesname)])
+                                                    else:
+                                                        files.append([Discnum, altname[0][1:-1], os.path.join(os.path.dirname(rom["filename"]),filesname)])
+                                                except:
+                                                    pass
+                                if len(files) > 0:
+                                    files.sort(key=lambda x: int(x[0]))
+                                    discs = []
+                                    for file in files:
+                                        discs.append(file[1])
+                                    dialog = xbmcgui.Dialog()
+                                    type3 = dialog.select("%s:" % __language__( 30035 ), discs)
+                                    if type3 > -1 :
+                                        myresult = files[type3]
+                                        rom["filename"] = myresult[2]
+                                        romfile = os.path.basename(rom["filename"])
+                                        rompath = os.path.dirname(rom["filename"])
+                                        romname = os.path.splitext(romfile)[0]
                                     else:
-                                        info.wShowWindow = 0
-                                else:
-                                    info = None
-                                startproc = subprocess_hack.Popen(r'%s %s' % (launcher["application"], arguments), cwd=apppath, startupinfo=info)
-                                startproc.wait()
-                        elif (sys.platform.startswith('linux')):
-                            if ( self.settings[ "lirc_state" ] ):
-                                xbmc.executebuiltin('LIRC.stop')
-                            os.system("\"%s\" %s " % (launcher["application"], arguments))
-                            if ( self.settings[ "lirc_state" ] ):
-                                xbmc.executebuiltin('LIRC.start')
-                        elif (sys.platform.startswith('darwin')):
-                            os.system("\"%s\" %s " % (launcher["application"], arguments))
-                        else:
-                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30609 )))
-                    xbmc.sleep(self.settings[ "start_tempo" ])
-                    if (launcher["minimize"] == "true"):
-                        _toogle_fullscreen()
-                    if ( self.settings[ "media_state" ] == "1" ):
-                        xbmc.sleep(2*self.settings[ "start_tempo" ])
-                        xbmc.executebuiltin('PlayerControl(Play)')
+                                        return ""
 
-    ''' get an xml data from an xml file '''
+                        if ( rom["altarg"] != "" ):
+                            arguments = rom["altarg"]
+                        else:
+                            arguments = launcher["args"]
+                        arguments = arguments.replace("%rom%" , rom["filename"]).replace("%ROM%" , rom["filename"])
+                        arguments = arguments.replace("%romfile%" , romfile).replace("%ROMFILE%" , romfile)
+                        arguments = arguments.replace("%romname%" , romname).replace("%ROMNAME%" , romname)
+                        arguments = arguments.replace("%rombasename%" , base_filename(romname)).replace("%ROMBASENAME%" , base_filename(romname))
+                        arguments = arguments.replace("%apppath%" , apppath).replace("%APPPATH%" , apppath)
+                        arguments = arguments.replace("%rompath%" , rompath).replace("%ROMPATH%" , rompath)
+                        arguments = arguments.replace("%romtitle%" , rom["name"]).replace("%ROMTITLE%" , rom["name"])
+                        arguments = arguments.replace("%romspath%" , launcher["rompath"]).replace("%ROMSPATH%" , launcher["rompath"])
+
+                        self._print_log(__language__( 30742 ) % application) 
+                        self._print_log(__language__( 30743 ) % arguments) 
+                        if ( os.path.basename(application).lower().replace(".exe" , "") == "xbmc" ):
+                            xbmc.executebuiltin('XBMC.' + arguments)
+                        else:
+                            if ( self.settings[ "media_state" ] != "2" ):
+                                if ( xbmc.Player().isPlaying() ):
+                                    if ( self.settings[ "media_state" ] == "0" ):
+                                        xbmc.Player().stop()
+                                    if ( self.settings[ "media_state" ] == "1" ):
+                                        xbmc.Player().pause()
+                                    xbmc.sleep(self.settings[ "start_tempo" ]+100)
+                                    try:
+                                        xbmc.audioSuspend()
+                                    except:
+                                        pass
+                            if (launcher["minimize"] == "true"):
+                                _toogle_fullscreen()
+                            if ( self.settings[ "launcher_notification" ] ):
+                                xbmc_notify(__language__( 30000 ), __language__( 30034 ) % rom["name"],3000)
+                            try:
+                                xbmc.enableNavSounds(False)                                 
+                            except:
+                                pass
+                            xbmc.sleep(self.settings[ "start_tempo" ])
+                            if (os.environ.get( "OS", "xbox" ) == "xbox"):
+                                f=open(SHORTCUT_FILE, "wb")
+                                f.write("<shortcut>\n")
+                                f.write("    <path>" + application + "</path>\n")
+                                f.write("    <custom>\n")
+                                f.write("       <game>" + rom["filename"] + "</game>\n")
+                                f.write("    </custom>\n")
+                                f.write("</shortcut>\n")
+                                f.close()
+                                xbmc.executebuiltin('XBMC.Runxbe(' + SHORTCUT_FILE + ')')
+                            else:
+                                if (sys.platform == 'win32'):
+                                    if ( launcher["lnk"] == "true" ) and ( launcher["romext"] == "lnk" ):
+                                        os.system("start \"\" \"%s\"" % (arguments))
+                                    else:
+                                        if ( application.split(".")[-1] == "bat" ):
+                                            info = subprocess_hack.STARTUPINFO()
+                                            info.dwFlags = 1
+                                            if ( self.settings[ "show_batch" ] ):
+                                                info.wShowWindow = 5
+                                            else:
+                                                info.wShowWindow = 0
+                                        else:
+                                            info = None
+                                        startproc = subprocess_hack.Popen(r'%s %s' % (application, arguments), cwd=apppath, startupinfo=info)
+                                        startproc.wait()
+                                elif (sys.platform.startswith('linux')):
+                                    if ( self.settings[ "lirc_state" ] ):
+                                        xbmc.executebuiltin('LIRC.stop')
+                                    os.system("\"%s\" %s " % (application, arguments))
+                                    if ( self.settings[ "lirc_state" ] ):
+                                        xbmc.executebuiltin('LIRC.start')
+                                elif (sys.platform.startswith('darwin')):
+                                    os.system("\"%s\" %s " % (application, arguments))
+                                else:
+                                    xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30609 ),3000)
+                            xbmc.sleep(self.settings[ "start_tempo" ])
+                            try:
+                                xbmc.enableNavSounds(True)                            
+                            except:
+                                pass
+                            if (launcher["minimize"] == "true"):
+                                _toogle_fullscreen()
+                            if ( self.settings[ "media_state" ] != "2" ):
+                                try:
+                                    xbmc.audioResume()
+                                except:
+                                    pass
+                                if ( self.settings[ "media_state" ] == "1" ):
+                                    xbmc.sleep(self.settings[ "start_tempo" ]+100)
+                                    xbmc.Player().play()
+                    else:
+                        xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30611 ) % os.path.basename(rom["filename"]),3000)
+                else:
+                    xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30611 ) % os.path.basename(launcher["application"]),3000)
+
     def get_xml_source( self, xmlpath ):
         try:
             usock = open( xmlpath, 'r' )
@@ -1485,8 +1830,6 @@ class Main:
             usock.close()
             ok = True
         except:
-            # oops print error message
-            print "ERROR: %s::%s (%d) - %s" % ( self.__class__.__name__, sys.exc_info()[ 2 ].tb_frame.f_code.co_name, sys.exc_info()[ 2 ].tb_lineno, sys.exc_info()[ 1 ], )
             ok = False
         if ( ok ):
             # clean, save and return the xml string
@@ -1500,12 +1843,10 @@ class Main:
             return ""
 
     def _save_launchers (self):
+        self._print_log(__language__( 30746 )) 
         xbmc.executebuiltin( "ActivateWindow(busydialog)" )
-        # make settings directory if doesn't exists
-        if (not os.path.isdir(os.path.dirname(TEMP_CURRENT_SOURCE_PATH))):
-            os.makedirs(os.path.dirname(TEMP_CURRENT_SOURCE_PATH))
         if ( self.settings[ "auto_backup" ] ):
-            # delete old backup files
+            # Delete oldest backup file
             fileData = {}
             dirList=os.listdir(DEFAULT_BACKUP_PATH)
             for fname in dirList:
@@ -1514,7 +1855,7 @@ class Main:
             delete = len(sortedFiles) - self.settings[ "nb_backup_files" ] + 1
             for x in range(0, delete):
                 os.remove(os.path.join( DEFAULT_BACKUP_PATH,sortedFiles[x][0]))
-            # make current launchers.xml backup
+            # Make a backup of current launchers.xml file
             if ( os.path.isfile(BASE_CURRENT_SOURCE_PATH)):
                 try:
                     now = datetime.datetime.now()
@@ -1522,263 +1863,133 @@ class Main:
                     BACKUP_CURRENT_SOURCE_PATH = os.path.join( DEFAULT_BACKUP_PATH , timestamp+"launchers.xml" )
                     shutil.copy2(BASE_CURRENT_SOURCE_PATH, BACKUP_CURRENT_SOURCE_PATH)
                 except OSError:
-                    xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30600 )))
+                    xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30600 ),3000)
         try:
-            usock = open( TEMP_CURRENT_SOURCE_PATH, 'w' )
-            usock.write("<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n")
-            usock.write("<launchers>\n")
+            xml_content = "<?xml version=\"1.0\" encoding=\"utf-8\" standalone=\"yes\"?>\n<advanced_launcher version=\"1.0\">\n\t<categories>\n"
+            # Create Categories XML list
+            for categoryIndex in sorted(self.categories, key= lambda x : self.categories[x]["name"]):
+                category = self.categories[categoryIndex]
+                xml_content += "\t\t<category>\n\t\t\t<id>"+categoryIndex+"</id>\n\t\t\t<name>"+category["name"]+"</name>\n\t\t\t<thumb>"+category["thumb"]+"</thumb>\n\t\t\t<fanart>"+category["fanart"]+"</fanart>\n\t\t\t<genre>"+category["genre"]+"</genre>\n\t\t\t<description>"+category["plot"]+"</description>\n\t\t\t<finished>"+category["finished"]+"</finished>\n\t\t</category>\n"
+            xml_content += "\t</categories>\n\t<launchers>\n"
+            # Create Launchers XML list
             for launcherIndex in sorted(self.launchers, key= lambda x : self.launchers[x]["name"]):
                 launcher = self.launchers[launcherIndex]
-                usock.write("\t<launcher>\n")
-                usock.write("\t\t<id>"+launcherIndex+"</id>\n")
-                # replace low-9 quotation mark by comma
-                usock.write("\t\t<name>"+launcher["name"]+"</name>\n")
-                usock.write("\t\t<application>"+launcher["application"]+"</application>\n")
-                usock.write("\t\t<args>"+launcher["args"]+"</args>\n")
-                usock.write("\t\t<rompath>"+launcher["rompath"]+"</rompath>\n")
-                usock.write("\t\t<thumbpath>"+launcher["thumbpath"]+"</thumbpath>\n")
-                usock.write("\t\t<fanartpath>"+launcher["fanartpath"]+"</fanartpath>\n")
-                usock.write("\t\t<trailerpath>"+launcher["trailerpath"]+"</trailerpath>\n")
-                usock.write("\t\t<custompath>"+launcher["custompath"]+"</custompath>\n")
-                usock.write("\t\t<romext>"+launcher["romext"]+"</romext>\n")
-                usock.write("\t\t<platform>"+launcher["gamesys"]+"</platform>\n")
-                usock.write("\t\t<thumb>"+launcher["thumb"]+"</thumb>\n")
-                usock.write("\t\t<fanart>"+launcher["fanart"]+"</fanart>\n")
-                usock.write("\t\t<genre>"+launcher["genre"]+"</genre>\n")
-                usock.write("\t\t<release>"+launcher["release"]+"</release>\n")
-                usock.write("\t\t<publisher>"+launcher["studio"]+"</publisher>\n")
-                usock.write("\t\t<launcherplot>"+launcher["plot"]+"</launcherplot>\n")
-                usock.write("\t\t<finished>"+launcher["finished"]+"</finished>\n")
-                usock.write("\t\t<minimize>"+launcher["minimize"]+"</minimize>\n")
-                usock.write("\t\t<lnk>"+launcher["lnk"]+"</lnk>\n")
-                usock.write("\t\t<roms>\n")
+                xml_content += "\t\t<launcher>\n\t\t\t<id>"+launcherIndex+"</id>\n\t\t\t<name>"+launcher["name"]+"</name>\n\t\t\t<category>"+launcher["category"]+"</category>\n\t\t\t<application>"+launcher["application"]+"</application>\n\t\t\t<args>"+launcher["args"]+"</args>\n\t\t\t<rompath>"+launcher["rompath"]+"</rompath>\n\t\t\t<thumbpath>"+launcher["thumbpath"]+"</thumbpath>\n\t\t\t<fanartpath>"+launcher["fanartpath"]+"</fanartpath>\n\t\t\t<trailerpath>"+launcher["trailerpath"]+"</trailerpath>\n\t\t\t<custompath>"+launcher["custompath"]+"</custompath>\n\t\t\t<romext>"+launcher["romext"]+"</romext>\n\t\t\t<platform>"+launcher["gamesys"]+"</platform>\n\t\t\t<thumb>"+launcher["thumb"]+"</thumb>\n\t\t\t<fanart>"+launcher["fanart"]+"</fanart>\n\t\t\t<genre>"+launcher["genre"]+"</genre>\n\t\t\t<release>"+launcher["release"]+"</release>\n\t\t\t<publisher>"+launcher["studio"]+"</publisher>\n\t\t\t<launcherplot>"+launcher["plot"]+"</launcherplot>\n\t\t\t<finished>"+launcher["finished"]+"</finished>\n\t\t\t<minimize>"+launcher["minimize"]+"</minimize>\n\t\t\t<lnk>"+launcher["lnk"]+"</lnk>\n\t\t\t<roms>\n"
+                # Create Items XML list
                 for romIndex in sorted(launcher["roms"], key= lambda x : launcher["roms"][x]["name"]):
                     romdata = launcher["roms"][romIndex]
-                    usock.write("\t\t\t<rom>\n")
-                    usock.write("\t\t\t\t<id>"+romIndex+"</id>\n")
-                    # replace low-9 quotation mark by comma
-                    usock.write("\t\t\t\t<name>"+romdata["name"]+"</name>\n")
-                    usock.write("\t\t\t\t<filename>"+romdata["filename"]+"</filename>\n")
-                    usock.write("\t\t\t\t<thumb>"+romdata["thumb"]+"</thumb>\n")
-                    usock.write("\t\t\t\t<fanart>"+romdata["fanart"]+"</fanart>\n")
-                    usock.write("\t\t\t\t<trailer>"+romdata["trailer"]+"</trailer>\n")
-                    usock.write("\t\t\t\t<custom>"+romdata["custom"]+"</custom>\n")
-                    usock.write("\t\t\t\t<genre>"+romdata["genre"]+"</genre>\n")
-                    usock.write("\t\t\t\t<release>"+romdata["release"]+"</release>\n")
-                    usock.write("\t\t\t\t<publisher>"+romdata["studio"]+"</publisher>\n")
-                    usock.write("\t\t\t\t<gameplot>"+romdata["plot"]+"</gameplot>\n")
-                    usock.write("\t\t\t\t<finished>"+romdata["finished"]+"</finished>\n")
-                    usock.write("\t\t\t</rom>\n")
-                usock.write("\t\t</roms>\n")
-                usock.write("\t</launcher>\n")
-            usock.write("</launchers>")
+                    xml_content += "\t\t\t\t<rom>\n\t\t\t\t\t<id>"+romIndex+"</id>\n\t\t\t\t\t<name>"+romdata["name"]+"</name>\n\t\t\t\t\t<filename>"+romdata["filename"]+"</filename>\n\t\t\t\t\t<thumb>"+romdata["thumb"]+"</thumb>\n\t\t\t\t\t<fanart>"+romdata["fanart"]+"</fanart>\n\t\t\t\t\t<trailer>"+romdata["trailer"]+"</trailer>\n\t\t\t\t\t<custom>"+romdata["custom"]+"</custom>\n\t\t\t\t\t<genre>"+romdata["genre"]+"</genre>\n\t\t\t\t\t<release>"+romdata["release"]+"</release>\n\t\t\t\t\t<publisher>"+romdata["studio"]+"</publisher>\n\t\t\t\t\t<gameplot>"+romdata["plot"]+"</gameplot>\n\t\t\t\t\t<finished>"+romdata["finished"]+"</finished>\n\t\t\t\t\t<altapp>"+romdata["altapp"]+"</altapp>\n\t\t\t\t\t<altarg>"+romdata["altarg"]+"</altarg>\n\t\t\t\t</rom>\n"
+                xml_content += "\t\t\t</roms>\n\t\t</launcher>\n"
+            xml_content += "\t</launchers>\n</advanced_launcher>"
+
+            # Save launchers.tmp file
+            usock = open( TEMP_CURRENT_SOURCE_PATH, 'w' )
+            usock.write(xml_content)
             usock.close()
             try:
                 shutil.copy2(TEMP_CURRENT_SOURCE_PATH, BASE_CURRENT_SOURCE_PATH)
             except OSError:
-                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30601 )))
+                xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30601 ),3000)
         except OSError:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30602 )))
+            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30602 ),3000)
         except IOError:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30603 )))
+            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30603 ),3000)
         os.remove(TEMP_CURRENT_SOURCE_PATH)
         xbmc.executebuiltin( "Dialog.Close(busydialog)" )
 
+    def _append_launchers(self, xmlfile):
+        destination = open(MERGED_SOURCE_PATH,'wb')
+        shutil.copyfileobj(open(xmlfile,'rb'), destination)
+        shutil.copyfileobj(open(BASE_CURRENT_SOURCE_PATH,'rb'), destination)
+        destination.close()
+        shutil.copy2(MERGED_SOURCE_PATH, BASE_CURRENT_SOURCE_PATH)
+        os.remove(MERGED_SOURCE_PATH)
+        xbmc.executebuiltin("Container.Refresh")
 
-    ''' read the list of launchers and roms from launchers.xml file '''
     def _load_launchers(self, xmlSource):
-        need_update = 0
+        self._print_log(__language__( 30747 )) 
         # clean, save and return the xml string
-        xmlSource = xmlSource.replace("&amp;", "&")
-        launchers = re.findall( "<launcher>(.*?)</launcher>", xmlSource )
-        for launcher in launchers:
-            launcherid = re.findall( "<id>(.*?)</id>", launcher )
-            name = re.findall( "<name>(.*?)</name>", launcher )
-            application = re.findall( "<application>(.*?)</application>", launcher )
-            args = re.findall( "<args>(.*?)</args>", launcher )
-            rompath = re.findall( "<rompath>(.*?)</rompath>", launcher )
-            thumbpath = re.findall( "<thumbpath>(.*?)</thumbpath>", launcher )
-            fanartpath = re.findall( "<fanartpath>(.*?)</fanartpath>", launcher )
-            trailerpath = re.findall( "<trailerpath>(.*?)</trailerpath>", launcher )
-            custompath = re.findall( "<custompath>(.*?)</custompath>", launcher )
-            romext = re.findall( "<romext>(.*?)</romext>", launcher )
-            gamesys = re.findall( "<platform>(.*?)</platform>", launcher )
-            thumb = re.findall( "<thumb>(.*?)</thumb>", launcher )
-            fanart = re.findall( "<fanart>(.*?)</fanart>", launcher )
-            genre = re.findall( "<genre>(.*?)</genre>", launcher )
-            release = re.findall( "<release>(.*?)</release>", launcher )
-            studio = re.findall( "<publisher>(.*?)</publisher>", launcher )
-            plot = re.findall( "<launcherplot>(.*?)</launcherplot>", launcher )
-            lnk = re.findall( "<lnk>(.*?)</lnk>", launcher )
-            finished = re.findall( "<finished>(.*?)</finished>", launcher )
-            minimize = re.findall( "<minimize>(.*?)</minimize>", launcher )
-            romsxml = re.findall( "<rom>(.*?)</rom>", launcher )
-
-            if len(launcherid) > 0 : launcherid = launcherid[0]
-            else:
-                launcherid = _get_SID()
-                need_update = 1
-            # replace comma by single low-9 quotation mark
-            if len(name) > 0 : name = name[0]
-            else: name = "unknown"
-            if len(application) > 0 : application = application[0]
-            else: application = ""
-            if len(args) > 0 : args = args[0]
-            else: args = ""
-            if len(rompath) > 0 : rompath = rompath[0]
-            else: rompath = ""
-            if len(thumbpath) > 0 : thumbpath = thumbpath[0]
-            else: thumbpath = ""
-            if len(fanartpath) > 0 : fanartpath = fanartpath[0]
-            else: fanartpath = ""
-            if len(trailerpath) > 0 : trailerpath = trailerpath[0]
-            else: trailerpath = ""
-            if len(custompath) > 0 : custompath = custompath[0]
-            else: custompath = ""
-            if len(romext) > 0: romext = romext[0]
-            else: romext = ""
-            if len(gamesys) > 0: gamesys = gamesys[0]
-            else: gamesys = ""
-            if len(thumb) > 0: thumb = thumb[0]
-            else: thumb = ""
-            if len(fanart) > 0: fanart = fanart[0]
-            else: fanart = ""
-            if len(genre) > 0: genre = genre[0]
-            else: genre = ""
-            if len(release) > 0: release = release[0]
-            else: release = ""
-            if len(studio) > 0: studio = studio[0]
-            else: studio = ""
-            if len(plot) > 0: plot = plot[0]
-            else: plot = ""
-            if len(finished) > 0: finished = finished[0]
-            else: finished = "false"
-            if len(lnk) > 0: lnk = lnk[0]
-            else:
-                if (sys.platform == 'win32'):
-                    lnk = "true"
-                else:
-                    lnk = ""
-            if len(minimize) > 0: minimize = minimize[0]
-            else: minimize = "false"
-
-            roms = {}
-            for rom in romsxml:
-                romid = re.findall( "<id>(.*?)</id>", rom )
-                romname = re.findall( "<name>(.*?)</name>", rom )
-                romfilename = re.findall( "<filename>(.*?)</filename>", rom )
-                romthumb = re.findall( "<thumb>(.*?)</thumb>", rom )
-                romfanart = re.findall( "<fanart>(.*?)</fanart>", rom )
-                romtrailer = re.findall( "<trailer>(.*?)</trailer>", rom )
-                romcustom = re.findall( "<custom>(.*?)</custom>", rom )
-                romgenre = re.findall( "<genre>(.*?)</genre>", rom )
-                romrelease = re.findall( "<release>(.*?)</release>", rom )
-                romstudio = re.findall( "<publisher>(.*?)</publisher>", rom )
-                romplot = re.findall( "<gameplot>(.*?)</gameplot>", rom )
-                romfinished = re.findall( "<finished>(.*?)</finished>", rom )
-                romgamesys = gamesys
-
-                if len(romid) > 0 : romid = romid[0]
-                else:
-                    romid = _get_SID()
-                    need_update = 1
-                if len(romname) > 0 : romname = romname[0]
-                else: romname = "unknown"
-                if len(romfilename) > 0 : romfilename = romfilename[0]
-                else: romfilename = ""
-                if len(romthumb) > 0 : romthumb = romthumb[0]
-                else: romthumb = ""
-                if len(romfanart) > 0 : romfanart = romfanart[0]
-                else: romfanart = ""
-                if len(romtrailer) > 0 : romtrailer = romtrailer[0]
-                else: romtrailer = ""
-                if len(romcustom) > 0 : romcustom = romcustom[0]
-                else: romcustom = ""
-                if len(romgenre) > 0 : romgenre = romgenre[0]
-                else: romgenre = ""
-                if len(romrelease) > 0 : romrelease = romrelease[0]
-                else: romrelease = ""
-                if len(romstudio) > 0 : romstudio = romstudio[0]
-                else: romstudio = ""
-                if len(romplot) > 0 : romplot = romplot[0]
-                else: romplot = ""
-                if len(romfinished) > 0 : romfinished = romfinished[0]
-                else: romfinished = "false"
-
-                # prepare rom object data
-                romdata = {}
-                romdata["name"] = romname
-                romdata["filename"] = romfilename
-                romdata["gamesys"] = romgamesys
-                romdata["thumb"] = romthumb
-                romdata["fanart"] = romfanart
-                romdata["trailer"] = romtrailer
-                romdata["custom"] = romcustom
-                romdata["genre"] = romgenre
-                romdata["release"] = romrelease
-                romdata["studio"] = romstudio
-                romdata["plot"] = romplot
-                romdata["finished"] = romfinished
-
-                # add rom to the roms list (using id as index)
-                roms[romid] = romdata
-
-            # prepare launcher object data
-            launcherdata = {}
-            launcherdata["name"] = name
-            launcherdata["application"] = application
-            launcherdata["args"] = args
-            launcherdata["rompath"] = rompath
-            launcherdata["thumbpath"] = thumbpath
-            launcherdata["fanartpath"] = fanartpath
-            launcherdata["trailerpath"] = trailerpath
-            launcherdata["custompath"] = custompath
-            launcherdata["romext"] = romext
-            launcherdata["gamesys"] = gamesys
-            launcherdata["thumb"] = thumb
-            launcherdata["fanart"] = fanart
-            launcherdata["genre"] = genre
-            launcherdata["release"] = release
-            launcherdata["studio"] = studio
-            launcherdata["plot"] = plot
-            launcherdata["finished"] = finished
-            launcherdata["lnk"] = lnk
-            launcherdata["minimize"] = minimize
-            launcherdata["roms"] = roms
-
-            # add launcher to the launchers list (using id as index)
-            self.launchers[launcherid] = launcherdata
-
-        if ( need_update == 1 ):
-            self._save_launchers()
-
-    def _get_launchers( self ):
-        if (len(self.launchers) > 0):
-            for key in sorted(self.launchers, key= lambda x : self.launchers[x]["application"]):
-                self._add_launcher(self.launchers[key]["name"], self.launchers[key]["application"], self.launchers[key]["rompath"], self.launchers[key]["thumbpath"], self.launchers[key]["fanartpath"], self.launchers[key]["trailerpath"], self.launchers[key]["custompath"], self.launchers[key]["romext"], self.launchers[key]["gamesys"], self.launchers[key]["thumb"], self.launchers[key]["fanart"], self.launchers[key]["genre"], self.launchers[key]["release"], self.launchers[key]["studio"], self.launchers[key]["plot"], self.launchers[key]["finished"], self.launchers[key]["lnk"], self.launchers[key]["minimize"], self.launchers[key]["roms"], len(self.launchers), key)
-            xbmcplugin.endOfDirectory( handle=int( self._handle ), succeeded=True, cacheToDisc=False )
-            return True
+        xmlSource = xmlSource.replace("&amp;", "&").replace('\r','').replace('\n','').replace('\t','')
+        # Get categories list from XML source
+        xml_categories = re.findall( "<categories>(.*?)</categories>", xmlSource )
+        # If categories exist ()...
+        if len(xml_categories) > 0 :
+            categories = re.findall( "<category>(.*?)</category>", xml_categories[0] )
+            for category in categories:
+                categorydata = {}
+                category_index = ["id","name","thumb","fanart","genre","plot","finished"]
+                values = [re.findall("<id>(.*?)</id>",category), re.findall("<name>(.*?)</name>",category), re.findall("<thumb>(.*?)</thumb>",category), re.findall("<fanart>(.*?)</fanart>",category), re.findall("<genre>(.*?)</genre>",category), re.findall("<description>(.*?)</description>",category), re.findall("<finished>(.*?)</finished>",category)]
+                for index, n in enumerate(category_index):
+                    try:
+                        categorydata[n] = values[index][0]
+                    except:
+                        categorydata[n] = ""
+                self.categories[categorydata["id"]] = categorydata
+        # Else create the default category
         else:
-            return False
+            self.categories["default"] = {"id":"default", "name":"Default", "thumb":"", "fanart":"", "genre":"", "plot":"", "finished":"false"}
+        # Get launchers list from XML source
+        xml_launchers = re.findall( "<launchers>(.*?)</launchers>", xmlSource )
+        # If launchers exist ()...
+        if len(xml_launchers) > 0 :
+            launchers = re.findall( "<launcher>(.*?)</launcher>", xml_launchers[0] )
+            for launcher in launchers:
+                launcherdata = {}
+                launcher_index = ["id","name","category","application","args","rompath","thumbpath","fanartpath","trailerpath","custompath","romext","gamesys","thumb","fanart","genre","release","studio","plot","finished","minimize","lnk","roms"]        
+                values = [re.findall("<id>(.*?)</id>",launcher), re.findall("<name>(.*?)</name>",launcher), re.findall("<category>(.*?)</category>",launcher), re.findall("<application>(.*?)</application>",launcher), re.findall("<args>(.*?)</args>",launcher), re.findall("<rompath>(.*?)</rompath>",launcher), re.findall("<thumbpath>(.*?)</thumbpath>",launcher), re.findall("<fanartpath>(.*?)</fanartpath>",launcher), re.findall("<trailerpath>(.*?)</trailerpath>",launcher), re.findall("<custompath>(.*?)</custompath>",launcher), re.findall("<romext>(.*?)</romext>",launcher), re.findall("<platform>(.*?)</platform>",launcher), re.findall("<thumb>(.*?)</thumb>",launcher), re.findall("<fanart>(.*?)</fanart>",launcher), re.findall("<genre>(.*?)</genre>",launcher), re.findall("<release>(.*?)</release>",launcher), re.findall("<publisher>(.*?)</publisher>",launcher), re.findall("<launcherplot>(.*?)</launcherplot>",launcher), re.findall("<finished>(.*?)</finished>",launcher), re.findall("<minimize>(.*?)</minimize>",launcher), re.findall("<lnk>(.*?)</lnk>",launcher), re.findall("<roms>(.*?)</roms>",launcher)]
+                for index, n in enumerate(launcher_index):
+                    try:
+                        launcherdata[n] = values[index][0]
+                    except:
+                        launcherdata[n] = ""
+                # Fix category to unassigned launcher
+                if (launcherdata["category"] == ""):
+                    launcherdata["category"] = "default"
+                # Get roms list from XML source
+                roms = re.findall( "<rom>(.*?)</rom>", launcherdata["roms"] )
+                roms_list = {}
+                # If roms exist...
+                if len(roms) > 0 :
+                    for rom in roms:
+                        romdata = {}
+                        rom_index = ["id","name","filename","thumb","fanart","trailer","custom","genre","release","studio","plot","finished","altapp","altarg"]        
+                        r_values = [re.findall("<id>(.*?)</id>",rom), re.findall("<name>(.*?)</name>",rom), re.findall("<filename>(.*?)</filename>",rom), re.findall("<thumb>(.*?)</thumb>",rom), re.findall("<fanart>(.*?)</fanart>",rom), re.findall("<trailer>(.*?)</trailer>",rom), re.findall("<custom>(.*?)</custom>",rom), re.findall("<genre>(.*?)</genre>",rom), re.findall("<release>(.*?)</release>",rom), re.findall("<publisher>(.*?)</publisher>",rom), re.findall("<gameplot>(.*?)</gameplot>",rom), re.findall("<finished>(.*?)</finished>",rom), re.findall("<altapp>(.*?)</altapp>",rom), re.findall("<altarg>(.*?)</altarg>",rom)]
+                        for r_index, r_n in enumerate(rom_index):
+                            try:
+                                romdata[r_n] = r_values[r_index][0]
+                            except :
+                                romdata[r_n] = ""
+                        romdata["gamesys"] = launcherdata["gamesys"]
+                        roms_list[romdata["id"]] = romdata
+                launcherdata["roms"] = roms_list
+                self.launchers[launcherdata["id"]] = launcherdata
+
+    def _get_categories( self ):
+        for key in sorted(self.categories, key= lambda x : self.categories[x]["name"]):
+            if ( not self.settings[ "hide_default_cat" ] or self.categories[key]['id'] != "default" ):
+                self._add_category(self.categories[key]["name"], self.categories[key]["thumb"], self.categories[key]["fanart"], self.categories[key]["genre"], self.categories[key]["plot"], self.categories[key]["finished"], len(self.categories), key)
+        xbmcplugin.endOfDirectory( handle=int( self._handle ), succeeded=True, cacheToDisc=False )
+
+    def _get_launchers( self, categoryID ):
+        for key in sorted(self.launchers, key= lambda x : self.launchers[x]["application"]):
+            if ( self.launchers[key]["category"] == categoryID ) :
+                self._add_launcher(self.launchers[key]["name"], self.launchers[key]["category"], self.launchers[key]["application"], self.launchers[key]["rompath"], self.launchers[key]["thumbpath"], self.launchers[key]["fanartpath"], self.launchers[key]["trailerpath"], self.launchers[key]["custompath"], self.launchers[key]["romext"], self.launchers[key]["gamesys"], self.launchers[key]["thumb"], self.launchers[key]["fanart"], self.launchers[key]["genre"], self.launchers[key]["release"], self.launchers[key]["studio"], self.launchers[key]["plot"], self.launchers[key]["finished"], self.launchers[key]["lnk"], self.launchers[key]["minimize"], self.launchers[key]["roms"], len(self.launchers), key)
+        xbmcplugin.endOfDirectory( handle=int( self._handle ), succeeded=True, cacheToDisc=False )
 
     def _get_roms( self, launcherID ):
         if (self.launchers.has_key(launcherID)):
             selectedLauncher = self.launchers[launcherID]
-            # error 
             roms = selectedLauncher["roms"]
-            if (len(roms) > 0) :
+            if ( len(roms) != 0 ):
                 for key in sorted(roms, key= lambda x : roms[x]["filename"]):
                     if (roms[key]["fanart"] ==""):
                         defined_fanart = selectedLauncher["fanart"]
                     else:
                         defined_fanart = roms[key]["fanart"]
-                    self._add_rom(launcherID, roms[key]["name"], roms[key]["filename"], roms[key]["gamesys"], roms[key]["thumb"], defined_fanart, roms[key]["trailer"], roms[key]["custom"], roms[key]["genre"], roms[key]["release"], roms[key]["studio"], roms[key]["plot"], roms[key]["finished"], len(roms), key)
+                    self._add_rom(launcherID, roms[key]["name"], roms[key]["filename"], roms[key]["gamesys"], roms[key]["thumb"], defined_fanart, roms[key]["trailer"], roms[key]["custom"], roms[key]["genre"], roms[key]["release"], roms[key]["studio"], roms[key]["plot"], roms[key]["finished"], roms[key]["altapp"], roms[key]["altarg"], len(roms), key, False, "")
                 xbmcplugin.endOfDirectory( handle=int( self._handle ), succeeded=True, cacheToDisc=False )
-                return True
             else:
-                return False
-        else:
-            return False
+                xbmc_notify(__language__( 30000 ), __language__( 30349 ),3000)
 
     def _report_hook( self, count, blocksize, totalsize ):
          percent = int( float( count * blocksize * 100) / totalsize )
@@ -1829,7 +2040,7 @@ class Main:
             pDialog.close()
             if not (removedRoms == 0):
                 self._print_log(__language__( 30502 ) % removedRoms)
-                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30502 ) % removedRoms))
+                xbmc_notify(__language__( 30000 ), __language__( 30502 ) % removedRoms,3000)
             else:
                 self._print_log(__language__( 30721 ))
                 
@@ -1861,6 +2072,8 @@ class Main:
                 import_text = __language__( 30061 ) % (f.replace("."+f.split(".")[-1],""),__language__( 30167 ))
             if ( self.settings[ "datas_method" ] == "2" ):
                 import_text = __language__( 30061 ) % (f.replace("."+f.split(".")[-1],""),self.settings[ "datas_scraper" ].encode('utf-8','ignore'))
+            if ( self.settings[ "datas_method" ] == "3" ):
+                import_text = __language__( 30084 ) % (f.replace("."+f.split(".")[-1],""),self.settings[ "datas_scraper" ].encode('utf-8','ignore'))
             pDialog.update(filesCount * 100 / len(files), import_text)
             self._print_log(__language__( 30725 ) % fullname)
             for ext in exts.split("|"):
@@ -1908,14 +2121,19 @@ class Main:
                         romdata["studio"] = ""
                         romdata["plot"] = ""
                         romdata["finished"] = "false"
+                        romdata["altapp"] = ""
+                        romdata["altarg"] = ""
 
                         self._print_log(import_text) 
                         self._print_log(__language__( 30732 ) % romname) 
                         # Search game title from scrapers
-                        if ( self.settings[ "datas_method" ] == "1" ):
+                        
+                        # Scrap from NFO files
+                        if ( self.settings[ "datas_method" ] == "1" ) or ( self.settings[ "datas_method" ] == "3" ) :
                             nfo_file=os.path.splitext(romdata["filename"])[0]+".nfo"
                             self._print_log(__language__( 30719 ) % nfo_file) 
                             if (os.path.isfile(nfo_file)):
+                                found_nfo = 1
                                 self._print_log(__language__( 30715 )) 
                                 self._print_log(__language__( 30733 ) % nfo_file) 
                                 ff = open(nfo_file, 'r')
@@ -1934,54 +2152,58 @@ class Main:
                                 if len(item_plot) > 0 : romdata["plot"] = item_plot[0].replace('&quot;','"')
                                 ff.close()
                             else:
+                                found_nfo = 0
                                 self._print_log(__language__( 30726 )) 
                                 romdata["name"] = title_format(self,romname)
-                                self._print_log(__language__( 30734 )) 
-                        else:
-                            if ( self.settings[ "datas_method" ] != "0" ):
-                                romdata["name"] = clean_filename(romname)
-                                if ( app.lower().find('mame') > 0 ) or ( self.settings[ "datas_scraper" ] == 'arcadeHITS' ):
-                                    self._print_log(__language__( 30735 )) 
-                                    results = self._get_first_game(f[:-len(ext)-1],gamesys)
+                                self._print_log(__language__( 30734 ))
+                                 
+                        # Scrap from www database
+                        if ( self.settings[ "datas_method" ] == "2" ) or ((self.settings[ "datas_method" ] == "3") and (found_nfo == 0)) :
+                            romdata["name"] = clean_filename(romname)
+                            if ( app.lower().find('mame') > 0 ) or ( self.settings[ "datas_scraper" ] == 'arcadeHITS' ):
+                                self._print_log(__language__( 30735 )) 
+                                results = self._get_first_game(f[:-len(ext)-1],gamesys)
+                                selectgame = 0
+                            else:
+                                if ( self.settings[ "scrap_info" ] == "1" ):
+                                    self._print_log(__language__( 30736 )) 
+                                    results = self._get_first_game(romdata["name"],gamesys)
                                     selectgame = 0
                                 else:
-                                    if ( self.settings[ "scrap_info" ] == "1" ):
-                                        self._print_log(__language__( 30736 )) 
-                                        results = self._get_first_game(romdata["name"],gamesys)
-                                        selectgame = 0
+                                    self._print_log(__language__( 30737 )) 
+                                    results,display = self._get_games_list(romdata["name"])
+                                    if display:
+                                        # Display corresponding game list found
+                                        dialog = xbmcgui.Dialog()
+                                        # Game selection
+                                        selectgame = dialog.select(__language__( 30078 ) % ( self.settings[ "datas_scraper" ] ), display)
+                                        if (selectgame == -1):
+                                            results = []
+                            if results:
+                                foundname = results[selectgame]["title"]
+                                if (foundname != ""):
+                                    if ( self.settings[ "ignore_title" ] ):
+                                        romdata["name"] = title_format(self,romname)
                                     else:
-                                        self._print_log(__language__( 30737 )) 
-                                        results,display = self._get_games_list(romdata["name"])
-                                        if display:
-                                            # Display corresponding game list found
-                                            dialog = xbmcgui.Dialog()
-                                            # Game selection
-                                            selectgame = dialog.select(__language__( 30078 ) % ( self.settings[ "datas_scraper" ] ), display)
-                                            if (selectgame == -1):
-                                                results = []
-                                if results:
-                                    foundname = results[selectgame]["title"]
-                                    if (foundname != ""):
-                                        if ( self.settings[ "ignore_title" ] ):
-                                            romdata["name"] = title_format(self,romname)
-                                        else:
-                                            romdata["name"] = title_format(self,foundname)
+                                        romdata["name"] = title_format(self,foundname)
 
-                                        # Game other game data
-                                        gamedata = self._get_game_data(results[selectgame])
-                                        romdata["genre"] = gamedata["genre"]
-                                        romdata["release"] = gamedata["release"]
-                                        romdata["studio"] = gamedata["studio"]
-                                        romdata["plot"] = gamedata["plot"]
-                                        progress_display = romdata["name"] + " (" + romdata["release"] + ")"
-                                    else:
-                                        progress_display = romname + ": " +__language__( 30503 )
+                                    # Game other game data
+                                    gamedata = self._get_game_data(results[selectgame])
+                                    romdata["genre"] = gamedata["genre"]
+                                    romdata["release"] = gamedata["release"]
+                                    romdata["studio"] = gamedata["studio"]
+                                    romdata["plot"] = gamedata["plot"]
+                                    progress_display = romdata["name"] + " (" + romdata["release"] + ")"
                                 else:
-                                    romdata["name"] = title_format(self,romname)
                                     progress_display = romname + ": " +__language__( 30503 )
                             else:
-                                self._print_log(__language__( 30738 )) 
                                 romdata["name"] = title_format(self,romname)
+                                progress_display = romname + ": " +__language__( 30503 )
+
+                        # No scrap
+                        if ( self.settings[ "datas_method" ] == "0" ):
+                            self._print_log(__language__( 30738 )) 
+                            romdata["name"] = title_format(self,romname)
 
                         # Search if thumbnails and fanarts already exist
                         self._print_log(__language__( 30704 ) % fullname )
@@ -2069,16 +2291,15 @@ class Main:
                                             img_url = self._get_thumbnail(self.image_url)
                                             ret = pDialog.create(__language__( 30000 ), __language__( 30014 ) % (path))
                                             pDialog.update(filesCount * 100 / len(files), __language__( 30061 ) % (f.replace("."+f.split(".")[-1],""),self.settings[ "datas_scraper" ].encode('utf-8','ignore')))
-                                    cached_thumb = thumbnails.get_cached_covers_thumb( thumb ).replace("tbn" , "jpg")
+                                    cached_thumb = Thumbnails().get_cached_covers_thumb( thumb ).replace("tbn" , "jpg")
                                     if ( img_url !='' ):
                                         try:
-                                            urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
-                                            h = urllib.urlretrieve(img_url,thumb)
-                                            shutil.copy2( thumb.decode(sys.getfilesystemencoding(),'ignore') , cached_thumb.decode(sys.getfilesystemencoding(),'ignore') )
+                                            download_img(img_url,thumb)
+                                            shutil.copy2( thumb.decode(get_encoding(),'ignore') , cached_thumb.decode(get_encoding(),'ignore') )
                                         except socket.timeout:
-                                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30604 )))
+                                            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30604 ),3000)
                                         except exceptions.IOError:
-                                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30654 )))
+                                            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30605 ),3000)
                                     else:
                                         if ( not os.path.isfile(thumb) ) & ( os.path.isfile(cached_thumb) ):
                                             os.remove(cached_thumb)
@@ -2125,16 +2346,15 @@ class Main:
                                             img_url = self._get_fanart(self.image_url)
                                             ret = pDialog.create(__language__( 30000 ), __language__( 30014 ) % (path))
                                             pDialog.update(filesCount * 100 / len(files), __language__( 30061 ) % (f.replace("."+f.split(".")[-1],""),self.settings[ "datas_scraper" ].encode('utf-8','ignore')))
-                                    cached_thumb = thumbnails.get_cached_covers_thumb( fanart ).replace("tbn" , "jpg")
+                                    cached_thumb = Thumbnails().get_cached_covers_thumb( fanart ).replace("tbn" , "jpg")
                                     if ( img_url !='' ):
                                         try:
-                                            urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
-                                            h = urllib.urlretrieve(img_url,fanart)
-                                            shutil.copy2( fanart.decode(sys.getfilesystemencoding(),'ignore') , cached_thumb.decode(sys.getfilesystemencoding(),'ignore') )
+                                            download_img(img_url,fanart)
+                                            shutil.copy2( fanart.decode(get_encoding(),'ignore') , cached_thumb.decode(get_encoding(),'ignore') )
                                         except socket.timeout:
-                                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30606 )))
+                                            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30606 ),3000)
                                         except exceptions.IOError:
-                                            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30607 )))
+                                            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30607 ),3000)
                                     else:
                                         if ( not os.path.isfile(fanart) ) & ( os.path.isfile(cached_thumb) ):
                                             os.remove(cached_thumb)
@@ -2152,7 +2372,7 @@ class Main:
                         romsCount = romsCount + 1
 
                         if (addRoms):
-                            self._add_rom(launcherID, romdata["name"], romdata["filename"], romdata["gamesys"], romdata["thumb"], romdata["fanart"], romdata["trailer"], romdata["custom"], romdata["genre"], romdata["release"], romdata["studio"], romdata["plot"], romdata["finished"], len(files), key)
+                            self._add_rom(launcherID, romdata["name"], romdata["filename"], romdata["gamesys"], romdata["thumb"], romdata["fanart"], romdata["trailer"], romdata["custom"], romdata["genre"], romdata["release"], romdata["studio"], romdata["plot"], romdata["finished"], romdata["altapp"], romdata["altarg"], len(files), key, False, "")
                             romadded = True
             if not romadded:
                 self._print_log(__language__( 30731 )) 
@@ -2165,12 +2385,36 @@ class Main:
             pDialog.close()
 
         if (skipCount == 0):
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30015 ) % (romsCount) + " " + __language__( 30050 )))
+            xbmc_notify(__language__( 30000 ), __language__( 30015 ) % (romsCount) + " " + __language__( 30050 ),3000)
             xbmc.executebuiltin("XBMC.ReloadSkin()")
         else:
-            xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30016 ) % (romsCount, skipCount) + " " + __language__( 30050 )))
+            xbmc_notify(__language__( 30000 ), __language__( 30016 ) % (romsCount, skipCount) + " " + __language__( 30050 ),3000)
 
-    def _add_launcher(self, name, cmd, path, thumbpath, fanartpath, trailerpath, custompath, ext, gamesys, thumb, fanart, genre, release, studio, plot, finished, lnk, minimize, roms, total, key) :
+    def _add_category(self, name, thumb, fanart, genre, plot, finished, total, key):
+        commands = []
+        commands.append((__language__( 30512 ), "XBMC.RunPlugin(%s?%s)" % (self._path, SEARCH_COMMAND) , ))
+        commands.append((__language__( 30051 ), "XBMC.RunPlugin(%s?%s)" % (self._path, FILE_MANAGER_COMMAND) , ))
+        commands.append((__language__( 30111 ), "XBMC.RunPlugin(%s?%s)" % (self._path, ADD_COMMAND) , ))
+        if (not self.categories[key]['id'] == "default" ):
+            commands.append(( __language__( 30110 ), "XBMC.RunPlugin(%s?%s/%s)" % (self._path, key, EDIT_COMMAND) , ))
+        folder = True
+        icon = "DefaultFolder.png"
+        if (thumb):
+            listitem = xbmcgui.ListItem( name, iconImage=icon, thumbnailImage=thumb )
+        else:
+            listitem = xbmcgui.ListItem( name, iconImage=icon )
+        commands.append(( __language__( 30194 ), "XBMC.RunPlugin(%s?%s/%s)" % (self._path, key, ADD_COMMAND) , ))
+        if ( finished != "true" ):
+            ICON_OVERLAY = 6
+        else:
+            ICON_OVERLAY = 7
+        listitem.setProperty("fanart_image", fanart)
+        listitem.setInfo( "video", { "Title": name, "Genre" : genre, "Plot" : plot, "overlay": ICON_OVERLAY } )
+        listitem.addContextMenuItems( commands )
+        if ( finished != "true" ) or ( self.settings[ "hide_finished" ] == False) :
+            xbmcplugin.addDirectoryItem( handle=int( self._handle ), url="%s?%s"  % (self._path, key), listitem=listitem, isFolder=True)
+
+    def _add_launcher(self, name, category, cmd, path, thumbpath, fanartpath, trailerpath, custompath, ext, gamesys, thumb, fanart, genre, release, studio, plot, finished, lnk, minimize, roms, total, key) :
         if (int(xbmc.getInfoLabel("System.BuildVersion")[0:2]) < 12 ):
             # Dharma / Eden compatible
             display_date_format = "Date"
@@ -2178,10 +2422,10 @@ class Main:
             # Frodo & + compatible
             display_date_format = "Year"
         commands = []
-        commands.append((__language__( 30512 ), "XBMC.RunPlugin(%s?%s)"    % (self._path, SEARCH_COMMAND) , ))
-        commands.append((__language__( 30051 ), "XBMC.RunPlugin(%s?%s)"    % (self._path, FILE_MANAGER_COMMAND) , ))
-        commands.append((__language__( 30101 ), "XBMC.RunPlugin(%s?%s)" % (self._path, ADD_COMMAND) , ))
-        commands.append(( __language__( 30109 ), "XBMC.RunPlugin(%s?%s/%s)" % (self._path, key, EDIT_COMMAND) , ))
+        commands.append((__language__( 30512 ), "XBMC.RunPlugin(%s?%s/%s)" % (self._path, category, SEARCH_COMMAND) , ))
+        commands.append((__language__( 30051 ), "XBMC.RunPlugin(%s?%s/%s)" % (self._path, category, FILE_MANAGER_COMMAND) , ))
+        commands.append((__language__( 30101 ), "XBMC.RunPlugin(%s?%s/%s)" % (self._path, category, ADD_COMMAND) , ))
+        commands.append(( __language__( 30109 ), "XBMC.RunPlugin(%s?%s/%s/%s)" % (self._path, category, key, EDIT_COMMAND) , ))
 
         if (path == ""):
             folder = False
@@ -2189,7 +2433,7 @@ class Main:
         else:
             folder = True
             icon = "DefaultFolder.png"
-            commands.append((__language__( 30106 ), "XBMC.RunPlugin(%s?%s/%s)" % (self._path, key, ADD_COMMAND) , ))
+            commands.append((__language__( 30106 ), "XBMC.RunPlugin(%s?%s/%s/%s)" % (self._path, category, key, ADD_COMMAND) , ))
 
         if (thumb):
             listitem = xbmcgui.ListItem( name, iconImage=icon, thumbnailImage=thumb )
@@ -2197,20 +2441,17 @@ class Main:
             listitem = xbmcgui.ListItem( name, iconImage=icon )
 
         filename = os.path.splitext(cmd)
-        if ( finished == "false" ):
+        if ( finished != "true" ):
             ICON_OVERLAY = 6
         else:
             ICON_OVERLAY = 7
         listitem.setProperty("fanart_image", fanart)
         listitem.setInfo( "video", { "Title": name, "Label": os.path.basename(cmd), "Plot" : plot , "Studio" : studio , "Genre" : genre , "Premiered" : release  , display_date_format : release  , "Writer" : gamesys , "Trailer" : os.path.join(trailerpath), "Director" : os.path.join(custompath), "overlay": ICON_OVERLAY } )
         listitem.addContextMenuItems( commands )
-        if ( finished == "false" ) or ( self.settings[ "hide_finished" ] == False) :
-            if (len(roms) > 0) :
-                xbmcplugin.addDirectoryItem( handle=int( self._handle ), url="%s?%s"  % (self._path, key), listitem=listitem, isFolder=True)
-            else:
-                xbmcplugin.addDirectoryItem( handle=int( self._handle ), url="%s?%s"  % (self._path, key), listitem=listitem, isFolder=False)
+        if ( finished != "true" ) or ( self.settings[ "hide_finished" ] == False) :
+            xbmcplugin.addDirectoryItem( handle=int( self._handle ), url="%s?%s/%s"  % (self._path, category, key), listitem=listitem, isFolder=folder)
 
-    def _add_rom( self, launcherID, name, cmd , romgamesys, thumb, romfanart, romtrailer, romcustom, romgenre, romrelease, romstudio, romplot, finished, total, key):
+    def _add_rom( self, launcherID, name, cmd , romgamesys, thumb, romfanart, romtrailer, romcustom, romgenre, romrelease, romstudio, romplot, finished, altapp, altarg, total, key, search, search_url):
         if (int(xbmc.getInfoLabel("System.BuildVersion")[0:2]) < 12 ):
             # Dharma / Eden compatible
             display_date_format = "Date"
@@ -2223,7 +2464,7 @@ class Main:
             listitem = xbmcgui.ListItem( name, iconImage=icon, thumbnailImage=thumb)
         else:
             listitem = xbmcgui.ListItem( name, iconImage=icon)
-        if ( finished == "false" ):
+        if ( finished != "true" ):
             ICON_OVERLAY = 6
         else:
             ICON_OVERLAY = 7
@@ -2231,11 +2472,13 @@ class Main:
         listitem.setInfo( "video", { "Title": name, "Label": os.path.basename(cmd), "Plot" : romplot, "Studio" : romstudio, "Genre" : romgenre, "Premiered" : romrelease  , display_date_format : romrelease, "Writer" : romgamesys, "Trailer" : os.path.join(romtrailer), "Director" : os.path.join(romcustom), "overlay": ICON_OVERLAY } )
 
         commands = []
-        commands.append((__language__( 30512 ), "XBMC.RunPlugin(%s?%s)"    % (self._path, SEARCH_COMMAND) , ))
-        commands.append(( __language__( 30107 ), "XBMC.RunPlugin(%s?%s/%s/%s)" % (self._path, launcherID, key, EDIT_COMMAND) , ))
+        commands.append((__language__( 30512 ), "XBMC.RunPlugin(%s?%s/%s/%s)" % (self._path, self.launchers[launcherID]["category"], launcherID, SEARCH_COMMAND) , ))
+        commands.append(( __language__( 30107 ), "XBMC.RunPlugin(%s?%s/%s/%s/%s)" % (self._path, self.launchers[launcherID]["category"], launcherID, key, EDIT_COMMAND) , ))
+        if search :
+            commands.append((__language__( 30513 ), "XBMC.RunPlugin(%s?%s/%s/%s)" % (self._path, self.launchers[launcherID]["category"], launcherID, SEARCH_COMMAND) , ))
         listitem.addContextMenuItems( commands )
-        if ( finished == "false" ) or ( self.settings[ "hide_finished" ] == False) :
-            xbmcplugin.addDirectoryItem( handle=int( self._handle ), url="%s?%s/%s"  % (self._path, launcherID, key), listitem=listitem, isFolder=False)
+        if ( finished != "true" ) or ( self.settings[ "hide_finished" ] == False) :
+            xbmcplugin.addDirectoryItem( handle=int( self._handle ), url="%s?%s/%s/%s"  % (self._path, self.launchers[launcherID]["category"], launcherID, key), listitem=listitem, isFolder=False)
 
     def _add_new_rom ( self , launcherID) :
         dialog = xbmcgui.Dialog()
@@ -2244,12 +2487,6 @@ class Main:
         ext = launcher["romext"]
         roms = launcher["roms"]
         rompath = launcher["rompath"]
-        romgamesys = launcher["gamesys"]
-        thumb_path = launcher["thumbpath"]
-        fanart_path = launcher["fanartpath"]
-        trailer_path = launcher["trailerpath"]
-        custom_path = launcher["custompath"]
-
         romfile = dialog.browse(1, __language__( 30017 ),"files", "."+ext.replace("|","|."), False, False, rompath)
         if (romfile):
             title=os.path.basename(romfile)
@@ -2260,232 +2497,246 @@ class Main:
                 if ( title == "" ):
                     title = os.path.basename(romfile)
                     title = title.replace('.'+title.split('.')[-1],'').replace('.',' ')
-                # prepare rom object data
-                romdata = {}
                 # Romname conversion if MAME
                 if ( app.lower().find('mame') > 0 ):
                     romname = self._get_mame_title(title)
-                    romdata["name"] = title_format(self,romname)
+                    romname = title_format(self,romname)
                 else:
-                    romdata["name"] = title_format(self,title)
-                romdata["filename"] = romfile
-                romdata["gamesys"] = romgamesys
-                romdata["thumb"] = ""
-                romdata["fanart"] = ""
+                    romname = title_format(self,title)
                 # Search for default thumbnails and fanart images path
                 ext2s = ['png', 'jpg', 'gif', 'jpeg', 'bmp', 'PNG', 'JPG', 'GIF', 'JPEG', 'BMP']
+                thumb_path = launcher["thumbpath"]
+                fanart_path = launcher["fanartpath"]
+                romthumb = ""
+                romfanart = ""
                 f = os.path.basename(romfile)
                 for ext2 in ext2s:
                     if (thumb_path == fanart_path) :
                         if (thumb_path == rompath) :
                             if (os.path.isfile(os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_thumb.'+ext2)))):
-                                romdata["thumb"] = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_thumb.'+ext2))
+                                romthumb = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_thumb.'+ext2))
                         else:
                             if (os.path.isfile(os.path.join(thumb_path, f.replace("."+f.split(".")[-1], '_thumb.'+ext2)))):
-                                romdata["thumb"] = os.path.join(thumb_path, f.replace("."+f.split(".")[-1], '_thumb.'+ext2))
+                                romthumb = os.path.join(thumb_path, f.replace("."+f.split(".")[-1], '_thumb.'+ext2))
                     else:
                         if (thumb_path == "") :
-                            romdata["thumb"] = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_thumb.jpg'))
+                            romthumb = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_thumb.jpg'))
                         else:
                             if (thumb_path == rompath) :
                                 if (os.path.isfile(os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '.'+ext2)))):
-                                    romdata["thumb"] = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '.'+ext2))
+                                    romthumb = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '.'+ext2))
                             else:
                                 if (os.path.isfile(os.path.join(thumb_path, f.replace("."+f.split(".")[-1], '.'+ext2)))):
-                                    romdata["thumb"] = os.path.join(thumb_path, f.replace("."+f.split(".")[-1], '.'+ext2))
+                                    romthumb = os.path.join(thumb_path, f.replace("."+f.split(".")[-1], '.'+ext2))
 
                     if (fanart_path == thumb_path) :
                         if (fanart_path == rompath) :
                             if (os.path.isfile(os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_fanart.'+ext2)))):
-                                romdata["fanart"] = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_fanart.'+ext2))
+                                romfanart = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_fanart.'+ext2))
                         else:
                             if (os.path.isfile(os.path.join(fanart_path, f.replace("."+f.split(".")[-1], '_fanart.'+ext2)))):
-                                romdata["fanart"] = os.path.join(fanart_path, f.replace("."+f.split(".")[-1], '_fanart.'+ext2))
+                                romfanart = os.path.join(fanart_path, f.replace("."+f.split(".")[-1], '_fanart.'+ext2))
                     else:
                         if (fanart_path == "") :
-                            romdata["fanart"] = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_fanart.jpg'))
+                            romfanart = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '_fanart.jpg'))
                         else:
                             if (fanart_path == rompath) :
                                 if (os.path.isfile(os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '.'+ext2)))):
-                                   romdata["fanart"] = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '.'+ext2))
+                                   romfanart = os.path.join(os.path.dirname(romfile), f.replace("."+f.split(".")[-1], '.'+ext2))
                             else:
                                 if (os.path.isfile(os.path.join(fanart_path, f.replace("."+f.split(".")[-1], '.'+ext2)))):
-                                    romdata["fanart"] = os.path.join(fanart_path, f.replace("."+f.split(".")[-1], '.'+ext2))
-                romdata["custom"] = custom_path
-                romdata["trailer"] = ""
-                romdata["genre"] = ""
-                romdata["release"] = ""
-                romdata["studio"] = ""
-                romdata["plot"] = ""
-                romdata["finished"] = "false"
-
+                                    romfanart = os.path.join(fanart_path, f.replace("."+f.split(".")[-1], '.'+ext2))
+                romdata = {"name":romname,"filename":romfile,"gamesys":launcher["gamesys"],"thumb":romthumb,"fanart":romfanart,"custom":launcher["custompath"],"trailer":"","genre":"","release":"","studio":"","plot":"","finished":"false","altapp":"","altarg":""}
                 # add rom to the roms list (using name as index)
                 romid = _get_SID()
                 roms[romid] = romdata
-
-                xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30019 ) + " " + __language__( 30050 )))
-
+                xbmc_notify(__language__( 30000 ), __language__( 30019 ) + " " + __language__( 30050 ),3000)
         self._save_launchers()
 
-    def _add_new_launcher ( self ) :
+    def _add_new_category ( self ) :
         dialog = xbmcgui.Dialog()
-        type = dialog.select(__language__( 30101 ), [__language__( 30021 ), __language__( 30022 ),__language__( 30051 )])
-        if (os.environ.get( "OS", "xbox" ) == "xbox"):
-            filter = ".xbe|.cut"
+        keyboard = xbmc.Keyboard("", __language__( 30112 ))
+        keyboard.doModal()
+        if (keyboard.isConfirmed()):
+            categorydata = {"name":keyboard.getText(),"thumb":"","fanart":"","genre":"","plot":"","finished":"false"}
+            categoryid = _get_SID()
+            self.categories[categoryid] = categorydata
+            self._save_launchers()
+            xbmc.executebuiltin("Container.Refresh")
+            xbmc_notify(__language__( 30000 ), __language__( 30113 ) % categorydata["name"],3000)
+            return True
         else:
-            if (sys.platform == "win32"):
-                filter = ".bat|.exe|.cmd|.lnk"
+            return False
+
+    def _add_new_launcher ( self, categoryID ) :
+        if ( self.categories.has_key(categoryID) ):
+            dialog = xbmcgui.Dialog()
+            type = dialog.select(__language__( 30101 ), [__language__( 30021 ), __language__( 30022 ), __language__( 30026 ), __language__( 30027 ),__language__( 30051 )])
+            if (os.environ.get( "OS", "xbox" ) == "xbox"):
+                filter = ".xbe|.cut"
             else:
-                filter = ""
-
-        if (type == 0):
-            app = xbmcgui.Dialog().browse(1,__language__( 30023 ),"files",filter)
-            if (app):
-                argument = self._get_program_arguments(os.path.basename(app))
-                argkeyboard = xbmc.Keyboard(argument, __language__( 30024 ))
-                argkeyboard.doModal()
-                args = argkeyboard.getText()
-                title = os.path.basename(app)
-                keyboard = xbmc.Keyboard(title.replace('.'+title.split('.')[-1],'').replace('.',' '), __language__( 30025 ))
-                keyboard.doModal()
-                title = keyboard.getText()
-                if ( title == "" ):
-                    title = os.path.basename(app)
-                    title = title.replace('.'+title.split('.')[-1],'').replace('.',' ')
-                # Selection of the launcher game system
-                dialog = xbmcgui.Dialog()
-                platforms = _get_game_system_list()
-                gamesystem = dialog.select(__language__( 30077 ), platforms)
-                # Selection of the thumbnails and fanarts path
-                if ( self.settings[ "launcher_thumb_path" ] == "" ):
-                    thumb_path = xbmcgui.Dialog().browse(0,__language__( 30059 ),"files","", False, False)
-                else:
-                    thumb_path = self.settings[ "launcher_thumb_path" ]
-                if ( self.settings[ "launcher_fanart_path" ] == "" ):
-                    fanart_path = xbmcgui.Dialog().browse(0,__language__( 30060 ),"files","", False, False)
-                else:
-                    fanart_path = self.settings[ "launcher_fanart_path" ]
-                # prepare launcher object data
-                launcherdata = {}
-                launcherdata["name"] = title
-                launcherdata["application"] = app
-                launcherdata["args"] = args
-                launcherdata["rompath"] = ""
-                if (thumb_path):
-                    launcherdata["thumbpath"] = thumb_path
-                else:
-                    launcherdata["thumbpath"] = ""
-                if (fanart_path):
-                    launcherdata["fanartpath"] = fanart_path
-                else:
-                    launcherdata["fanartpath"] = ""
-                launcherdata["custompath"] = ""
-                launcherdata["trailerpath"] = ""
-                launcherdata["romext"] = ""
-                if (not gamesystem == -1 ):
-                    launcherdata["gamesys"] = platforms[gamesystem]
-                else:
-                    launcherdata["gamesys"] = ""
-                launcherdata["thumb"] = ""
-                launcherdata["fanart"] = ""
-                launcherdata["genre"] = ""
-                launcherdata["release"] = ""
-                launcherdata["studio"] = ""
-                launcherdata["plot"] = ""
-                launcherdata["finished"] = "false"
                 if (sys.platform == "win32"):
-                    launcherdata["lnk"] = "true"
+                    filter = ".bat|.exe|.cmd|.lnk"
                 else:
-                    launcherdata["lnk"] = ""
-                launcherdata["minimize"] = "false"
-                launcherdata["roms"] = {}
+                    filter = ""
 
-                # add launcher to the launchers list (using name as index)
-                launcherid = _get_SID()
-                self.launchers[launcherid] = launcherdata
-                self._save_launchers()
-
-                xbmc.executebuiltin("Container.Update")
-                return True
-
-        if (type == 1):
-            app = xbmcgui.Dialog().browse(1,__language__( 30023 ),"files",filter)
-            if (app):
-                path = xbmcgui.Dialog().browse(0,__language__( 30058 ),"files", "", False, False)
-                if (path):
-                    extensions = self._get_program_extensions(os.path.basename(app))
-                    extkey = xbmc.Keyboard(extensions, __language__( 30028 ))
-                    extkey.doModal()
-                    if (extkey.isConfirmed()):
-                        ext = extkey.getText()
-                        argument = self._get_program_arguments(os.path.basename(app))
-                        argkeyboard = xbmc.Keyboard(argument, __language__( 30024 ))
-                        argkeyboard.doModal()
-                        args = argkeyboard.getText()
+            if (type == 0):
+                app = xbmcgui.Dialog().browse(1,__language__( 30023 ),"files",filter)
+                if (app):
+                    argument = ""
+                    argkeyboard = xbmc.Keyboard(argument, __language__( 30024 ))
+                    argkeyboard.doModal()
+                    args = argkeyboard.getText()
+                    title = os.path.basename(app)
+                    keyboard = xbmc.Keyboard(title.replace('.'+title.split('.')[-1],'').replace('.',' '), __language__( 30025 ))
+                    keyboard.doModal()
+                    title = keyboard.getText()
+                    if ( title == "" ):
                         title = os.path.basename(app)
-                        keyboard = xbmc.Keyboard(title.replace('.'+title.split('.')[-1],'').replace('.',' '), __language__( 30025 ))
-                        keyboard.doModal()
-                        title = keyboard.getText()
-                        if ( title == "" ):
+                        title = title.replace('.'+title.split('.')[-1],'').replace('.',' ')
+                    # Selection of the launcher game system
+                    dialog = xbmcgui.Dialog()
+                    platforms = _get_game_system_list()
+                    gamesystem = dialog.select(__language__( 30077 ), platforms)
+                    # Selection of the thumbnails and fanarts path
+                    if ( self.settings[ "launcher_thumb_path" ] == "" ):
+                        thumb_path = xbmcgui.Dialog().browse(0,__language__( 30059 ),"files","", False, False)
+                    else:
+                        thumb_path = self.settings[ "launcher_thumb_path" ]
+                    if ( self.settings[ "launcher_fanart_path" ] == "" ):
+                        fanart_path = xbmcgui.Dialog().browse(0,__language__( 30060 ),"files","", False, False)
+                    else:
+                        fanart_path = self.settings[ "launcher_fanart_path" ]
+                    # create launcher object data
+                    if not (thumb_path):
+                        thumb_path = ""
+                    if not (fanart_path):
+                        fanart_path = ""
+                    if (not gamesystem == -1 ):
+                        launcher_gamesys = platforms[gamesystem]
+                    else:
+                        launcher_gamesys = ""
+                    if (sys.platform == "win32"):
+                        launcher_lnk = "true"
+                    else:
+                        launcher_lnk = ""
+                    launcherdata = {"name":title, "category":categoryID, "application":app, "args":args, "rompath":"", "thumbpath":thumb_path, "fanartpath":fanart_path, "custompath":"", "trailerpath":"", "romext":"", "gamesys":launcher_gamesys, "thumb":"", "fanart":"", "genre":"", "release":"", "studio":"", "plot":"", "finished":"false", "lnk":launcher_lnk, "minimize":"false", "roms":{}}
+                    # add launcher to the launchers list (using name as index)
+                    launcherid = _get_SID()
+                    self.launchers[launcherid] = launcherdata
+                    self._save_launchers()
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s)" % (self._path,categoryID))
+                    return True
+
+            if (type == 1):
+                app = xbmcgui.Dialog().browse(1,__language__( 30023 ),"files",filter)
+                if (app):
+                    path = xbmcgui.Dialog().browse(0,__language__( 30058 ),"files", "", False, False)
+                    if (path):
+                        extensions = self._get_program_extensions(os.path.basename(app))
+                        extkey = xbmc.Keyboard(extensions, __language__( 30028 ))
+                        extkey.doModal()
+                        if (extkey.isConfirmed()):
+                            ext = extkey.getText()
+                            argument = self._get_program_arguments(os.path.basename(app))
+                            argkeyboard = xbmc.Keyboard(argument, __language__( 30024 ))
+                            argkeyboard.doModal()
+                            args = argkeyboard.getText()
                             title = os.path.basename(app)
-                            title = title.replace('.'+title.split('.')[-1],'').replace('.',' ')
-                        # Selection of the launcher game system
-                        dialog = xbmcgui.Dialog()
-                        platforms = _get_game_system_list()
-                        gamesystem = dialog.select(__language__( 30077 ), platforms)
-                        # Selection of the thumbnails and fanarts path
-                        thumb_path = xbmcgui.Dialog().browse(0,__language__( 30059 ),"files","", False, False, os.path.join(path))
-                        fanart_path = xbmcgui.Dialog().browse(0,__language__( 30060 ),"files","", False, False, os.path.join(path))
-                        # prepare launcher object data
-                        launcherdata = {}
-                        launcherdata["name"] = title
-                        launcherdata["application"] = app
-                        launcherdata["args"] = args
-                        launcherdata["rompath"] = path
-                        if (thumb_path):
-                            launcherdata["thumbpath"] = thumb_path
-                        else:
-                            launcherdata["thumbpath"] = ""
-                        if (fanart_path):
-                            launcherdata["fanartpath"] = fanart_path
-                        else:
-                            launcherdata["fanartpath"] = ""
-                        launcherdata["custompath"] = ""
-                        launcherdata["trailerpath"] = ""
-                        launcherdata["romext"] = ext
-                        if (not gamesystem == -1 ):
-                            launcherdata["gamesys"] = platforms[gamesystem]
-                        else:
-                            launcherdata["gamesys"] = ""
-                        launcherdata["thumb"] = ""
-                        launcherdata["fanart"] = ""
-                        launcherdata["genre"] = ""
-                        launcherdata["release"] = ""
-                        launcherdata["studio"] = ""
-                        launcherdata["plot"] = ""
-                        launcherdata["finished"] = "false"
-                        if (sys.platform == "win32"):
-                            launcherdata["lnk"] = "true"
-                        else:
-                            launcherdata["lnk"] = ""
-                        launcherdata["minimize"] = "false"
-                        launcherdata["roms"] = {}
+                            keyboard = xbmc.Keyboard(title.replace('.'+title.split('.')[-1],'').replace('.',' '), __language__( 30025 ))
+                            keyboard.doModal()
+                            title = keyboard.getText()
+                            if ( title == "" ):
+                                title = os.path.basename(app)
+                                title = title.replace('.'+title.split('.')[-1],'').replace('.',' ')
+                            # Selection of the launcher game system
+                            dialog = xbmcgui.Dialog()
+                            platforms = _get_game_system_list()
+                            gamesystem = dialog.select(__language__( 30077 ), platforms)
+                            # Selection of the thumbnails and fanarts path
+                            thumb_path = xbmcgui.Dialog().browse(0,__language__( 30059 ),"files","", False, False, os.path.join(path))
+                            fanart_path = xbmcgui.Dialog().browse(0,__language__( 30060 ),"files","", False, False, os.path.join(path))
+                            # create launcher object data
+                            if not (thumb_path):
+                                thumb_path = ""
+                            if not (fanart_path):
+                                fanart_path = ""
+                            if (not gamesystem == -1 ):
+                                launcher_gamesys = platforms[gamesystem]
+                            else:
+                                launcher_gamesys = ""
+                            if (sys.platform == "win32"):
+                                launcher_lnk = "true"
+                            else:
+                                launcher_lnk = ""
+                            launcherdata = {"name":title, "category":categoryID, "application":app, "args":args, "rompath":path, "thumbpath":thumb_path, "fanartpath":fanart_path, "custompath":"", "trailerpath":"", "romext":ext, "gamesys":launcher_gamesys, "thumb":"", "fanart":"", "genre":"", "release":"", "studio":"", "plot":"", "finished":"false", "lnk":launcher_lnk, "minimize":"false", "roms":{}}
+                            # add launcher to the launchers list (using name as index)
+                            launcherid = _get_SID()
+                            self.launchers[launcherid] = launcherdata
+                            self._save_launchers()
+                            xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s)" % (self._path,categoryID))
+                            return True
+            if (type == 2):
+                try:
+                    launcher_query, query = self._find_roms(True)
+                except:
+                    return False
+                if (launcher_query):
+                    launcherid = _get_SID()
+                    app = "xbmc-sea-%s" % launcherid
+                    args = 'ActivateWindow(10001,"%s")' % launcher_query
+                    title = os.path.basename(query)
+                    keyboard = xbmc.Keyboard(title.replace('.'+title.split('.')[-1],'').replace('.',' '), __language__( 30025 ))
+                    keyboard.doModal()
+                    title = keyboard.getText()
+                    if ( title == "" ):
+                        title = os.path.basename(launcher_query)
+                    launcherdata = {"name":title, "category":categoryID, "application":app, "args":args, "rompath":"", "thumbpath":DEFAULT_THUMB_PATH, "fanartpath":DEFAULT_FANART_PATH, "custompath":"", "trailerpath":"", "romext":"", "gamesys":"xbmc", "thumb":"", "fanart":"", "genre":"", "release":"", "studio":"", "plot":"", "finished":"false", "lnk":"", "minimize":"false", "roms":{}}
+                    # add launcher to the launchers list (using name as index)
+                    launcherid = _get_SID()
+                    self.launchers[launcherid] = launcherdata
+                    self._save_launchers()
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s)" % (self._path,categoryID))
+                    return True
 
-                        # add launcher to the launchers list (using name as index)
-                        launcherid = _get_SID()
-                        self.launchers[launcherid] = launcherdata
-                        self._save_launchers()
-                        xbmc.executebuiltin("Container.Update")
-                        return True
-        if (type == 2):
-            self._file_manager()
+            if (type == 3):
+                favourites, fav_nanes = _get_favourites_list()
+                favourite_url = dialog.select(__language__( 30115 ), fav_nanes)
+                if ( favourite_url != -1):
+                    launcherid = _get_SID()
+                    app = "xbmc-fav-%s" % launcherid
+                    args = favourites[favourite_url][0]
+                    title = os.path.basename(favourites[favourite_url][2])
+                    keyboard = xbmc.Keyboard(title.replace('.'+title.split('.')[-1],'').replace('.',' '), __language__( 30025 ))
+                    keyboard.doModal()
+                    title = keyboard.getText()
+                    if ( title == "" ):
+                        title = os.path.basename(favourites[favourite_url][2])
+                    if (favourites[favourite_url][1] != ""):
+                        thumb = favourites[favourite_url][1]
+                    else:
+                        thumb = ""
+                    launcherdata = {"name":title, "category":categoryID, "application":app, "args":args, "rompath":"", "thumbpath":DEFAULT_THUMB_PATH, "fanartpath":DEFAULT_FANART_PATH, "custompath":"", "trailerpath":"", "romext":"", "gamesys":"xbmc", "thumb":thumb, "fanart":"", "genre":"", "release":"", "studio":"", "plot":"", "finished":"false", "lnk":"", "minimize":"false", "roms":{}}
+                    # add launcher to the launchers list (using name as index)
+                    launcherid = _get_SID()
+                    self.launchers[launcherid] = launcherdata
+                    self._save_launchers()
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s)" % (self._path,categoryID))
+                    return True
 
-        return False
+            if (type == 4):
+                self._file_manager()
+
+        else:
+            xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30613 ),3000)
+            xbmc.executebuiltin("ReplaceWindow(Programs,%s)" % (self._path))
+            return False
+            
 
     def _file_manager( self ):
         xbmc.executebuiltin("ActivateWindow(filemanager)")
 
-    def _find_roms( self ):
+    def _find_roms( self, is_launcher ):
         dialog = xbmcgui.Dialog()
         type = dialog.select(__language__( 30400 ), [__language__( 30401 ),__language__( 30402 ),__language__( 30403 ),__language__( 30404 ),__language__( 30405 )])
         type_nb = 0
@@ -2496,7 +2747,10 @@ class Main:
             keyboard.doModal()
             if (keyboard.isConfirmed()):
                 search = keyboard.getText()
-                xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search, SEARCH_COMMAND))
+                if (is_launcher):
+                    return "%s?%s/%s" % (self._path, search, SEARCH_ITEM_COMMAND), search
+                else:
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search, SEARCH_ITEM_COMMAND))
 
         #Search by Release Date
         type_nb = type_nb+1
@@ -2506,7 +2760,10 @@ class Main:
             dialog = xbmcgui.Dialog()
             selected = dialog.select(__language__( 30406 ), search)
             if (not selected == -1 ):
-                xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_DATE_COMMAND))
+                if (is_launcher):
+                    return "%s?%s/%s" % (self._path, search[selected], SEARCH_DATE_COMMAND), search[selected]
+                else:
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_DATE_COMMAND))
 
         #Search by System Platform
         type_nb = type_nb+1
@@ -2516,7 +2773,10 @@ class Main:
             dialog = xbmcgui.Dialog()
             selected = dialog.select(__language__( 30407 ), search)
             if (not selected == -1 ):
-                xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_PLATFORM_COMMAND))
+                if (is_launcher):
+                    return "%s?%s/%s" % (self._path, search[selected], SEARCH_PLATFORM_COMMAND), search[selected]
+                else:
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_PLATFORM_COMMAND))
 
         #Search by Studio
         type_nb = type_nb+1
@@ -2526,7 +2786,10 @@ class Main:
             dialog = xbmcgui.Dialog()
             selected = dialog.select(__language__( 30408 ), search)
             if (not selected == -1 ):
-                xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_STUDIO_COMMAND))
+                if (is_launcher):
+                    return "%s?%s/%s" % (self._path, search[selected], SEARCH_STUDIO_COMMAND), search[selected]
+                else:
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_STUDIO_COMMAND))
 
         #Search by Genre
         type_nb = type_nb+1
@@ -2536,7 +2799,10 @@ class Main:
             dialog = xbmcgui.Dialog()
             selected = dialog.select(__language__( 30409 ), search)
             if (not selected == -1 ):
-                xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_GENRE_COMMAND))
+                if (is_launcher):
+                    return "%s?%s/%s" % (self._path, search[selected], SEARCH_GENRE_COMMAND), search[selected]
+                else:
+                    xbmc.executebuiltin("ReplaceWindow(Programs,%s?%s/%s)" % (self._path, search[selected], SEARCH_GENRE_COMMAND))
 
     def _find_add_roms( self, search ):
         _find_category_roms( self, search, "name" )
@@ -2605,13 +2871,22 @@ def MyDialog(img_list):
         print_exc()
         return False
     del w
+
+def xbmc_notify(title,text,time):
+    xbmc.executebuiltin("XBMC.Notification(%s,%s,%s,%s)" % (title,text,time,ICON_IMG_FILE))
     
-def _update_cache(file_path):
-    cached_thumb = thumbnails.get_cached_covers_thumb( file_path ).replace("tbn" , os.path.splitext(file_path)[-1][1:4])
+def get_encoding():
     try:
-        shutil.copy2( file_path.decode(sys.getfilesystemencoding(),'ignore') , cached_thumb.decode(sys.getfilesystemencoding(),'ignore') )
+        return sys.getfilesystemencoding()
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return "utf-8"
+
+def _update_cache(file_path):
+    cached_thumb = Thumbnails().get_cached_covers_thumb( file_path ).replace("tbn" , os.path.splitext(file_path)[-1][1:4])
+    try:
+        shutil.copy2( file_path.decode(get_encoding(),'ignore'), cached_thumb.decode(get_encoding(),'ignore') )
     except OSError:
-        xbmc.executebuiltin("XBMC.Notification(%s,%s, 3000)" % (__language__( 30000 ), __language__( 30608 )))
+        xbmc_notify(__language__( 30000 )+" - "+__language__( 30612 ), __language__( 30608 ),3000)
     xbmc.executebuiltin("XBMC.ReloadSkin()")
 
 def title_format(self,title):
@@ -2629,6 +2904,18 @@ def title_format(self,title):
         if (title.endswith(", A")): new_title = "A "+"".join(title.rsplit(", A",1))
         if (title.endswith(", An")): new_title = "An "+"".join(title.rsplit(", An",1))
     return new_title
+
+def download_img(img_url,file_path):
+    req = urllib2.Request(img_url)
+    req.add_unredirected_header('User-Agent', getUserAgent())
+    f = open(file_path,'wb')
+    f.write(urllib2.urlopen(req).read())
+    f.close()                                
+
+def download_page(url):
+    req = urllib2.Request(url)
+    req.add_unredirected_header('User-Agent', getUserAgent())
+    return urllib2.urlopen(req)
 
 def clean_filename(title):
     title = re.sub('\[.*?\]', '', title)
@@ -2678,9 +2965,25 @@ def _get_game_system_list():
             result = line.replace('\n', '').replace('"', '').split(',')
             platforms.append(result[0])
         platforms.sort()
+        csvfile.close()
         return platforms
     except:
         return platforms
+
+def _get_favourites_list():
+    favourites = []
+    fav_names = []
+    if os.path.isfile( FAVOURITES_PATH ):
+        fav_xml = parse( FAVOURITES_PATH )
+        fav_doc = fav_xml.documentElement.getElementsByTagName( 'favourite' )
+        for count, favourite in enumerate(fav_doc):
+            try:
+                fav_icon = favourite.attributes[ 'thumb' ].nodeValue
+            except:
+                fav_icon = "DefaultProgram.png"
+            favourites.append((favourite.childNodes[ 0 ].nodeValue.encode('utf8','ignore'), fav_icon.encode('utf8','ignore'), favourite.attributes[ 'name' ].nodeValue.encode('utf8','ignore')))
+            fav_names.append(favourite.attributes[ 'name' ].nodeValue.encode('utf8','ignore'))
+    return favourites, fav_names
 
 def _search_category(self,category):
     search = []
@@ -2698,6 +3001,17 @@ def _search_category(self,category):
 
 def _find_category_roms( self, search, category ):
     #sorted by name
+    if category == 'name' : 
+        s_cmd = SEARCH_ITEM_COMMAND
+    if category == 'release' :
+        s_cmd = SEARCH_DATE_COMMAND
+    if category == 'gamesys' :
+        s_cmd = SEARCH_PLATFORM_COMMAND
+    if category == 'studio' :
+        s_cmd = SEARCH_STUDIO_COMMAND
+    if category == 'genre' :
+        s_cmd = SEARCH_GENRE_COMMAND
+    s_url = 'plugin://plugin.program.advanced.launcher/?'+search+'/'+s_cmd
     if (len(self.launchers) > 0):
         rl = {}
         for launcherID in sorted(self.launchers.iterkeys()):
@@ -2723,5 +3037,5 @@ def _find_category_roms( self, search, category ):
                             rl[keyr]["launcherID"] = launcherID
     #print the list sorted
     for key in sorted(rl.iterkeys()):
-        self._add_rom(rl[key]["launcherID"], rl[key]["name"], rl[key]["filename"], rl[key]["gamesys"], rl[key]["thumb"], rl[key]["fanart"], rl[key]["trailer"], rl[key]["custom"], rl[key]["genre"], rl[key]["release"], rl[key]["studio"], rl[key]["plot"], rl[key]["finished"], len(rl), key)
+        self._add_rom(rl[key]["launcherID"], rl[key]["name"], rl[key]["filename"], rl[key]["gamesys"], rl[key]["thumb"], rl[key]["fanart"], rl[key]["trailer"], rl[key]["custom"], rl[key]["genre"], rl[key]["release"], rl[key]["studio"], rl[key]["plot"], rl[key]["finished"], rl[key]["altapp"], rl[key]["altarg"], len(rl), key, True, s_url)
     xbmcplugin.endOfDirectory( handle=int( self._handle ), succeeded=True, cacheToDisc=False )

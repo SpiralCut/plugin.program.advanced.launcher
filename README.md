@@ -1,7 +1,7 @@
-# Advanced Launcher 1.13.2 (Unofficial Release)
+# Advanced Launcher 2.5.9 (Unofficial Release)
 This is an updated fork of Angelscry's Advanced Launcher Kodi plugin.  The only focus of these updates is to fix any issues caused by updates to Kodi or changes to the scraped websites APIs/designs.
 
-<h3>Updates since 1.13.1</h3>
+<h3>Updates since 2.5.8</h3>
 <ul>
 	<li>Fix GameFAQs, MobyGames, TheGamesDB, arcadeHITS, and Google scrapers.</li>
 	<li>Update Google scraper to use new Google image sizes.</li>

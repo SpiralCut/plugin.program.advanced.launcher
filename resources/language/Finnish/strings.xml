@@ -64,13 +64,6 @@
     <string id="30106">Lisää kohteita</string>
     <string id="30107">Muokkaa kohdetta</string>
     <string id="30109">Muokkaa käynnistintä</string>
-    <string id="30110">Can't Access GameFAQs</string>
-    <string id="30111">Your IP address may be blocked due to excessive searches.</string>
-    <string id="30112">If you would like to continue, you may need to go to GameFAQs and complete a capcha on the search page.</string>
-    <string id="30113">If you have already completed this step, you may need to wait a few seconds</string>
-    <string id="30114">Continue</string>
-    <string id="30115">Cancel</string>
-
     
     <string id="30120">Tuonnin tila</string>
     <string id="30121">Lähde</string>
@@ -90,9 +83,9 @@
     <string id="30138">Pieni</string>
     <string id="30139">Keskikokoinen</string>
     <string id="30140">Iso</string>
-    <string id="30141">720p</string>
-    <string id="30142">1080p</string>
-    <string id="30143">4K</string>
+    <string id="30141">XL</string>
+    <string id="30142">XXL</string>
+    <string id="30143">Valtava</string>
     <string id="30144">Eurooppa</string>
     <string id="30145">Japani</string>
     <string id="30146">Amerikka</string>
@@ -124,13 +117,19 @@
     <string id="30173">Hakupaikan asetukset</string>
     <string id="30174">Haun asetukset</string>
     <string id="30175">Poista käytöstä LIRC (Linux)</string>
+    <string id="30196">Can't Access GameFAQs</string>
+    <string id="30197">Your IP address may be blocked due to excessive searches.</string>
+    <string id="30198">If you would like to continue, you may need to go to GameFAQs and complete a capcha on the search page.</string>
+    <string id="30199">If you have already completed this step, you may need to wait a few seconds</string>
 
     <string id="30201">oletus</string>
     <string id="30202">edistyneet käyttäjät</string>
-    <string id="30203">Vaihda XBMC:n kokoruudun tila</string>
+    <string id="30203">Vaihda Kodi:n kokoruudun tila</string>
     <string id="30204">Päällä</string>
     <string id="30205">Pois</string>
     <string id="30206">Pikakuvake-tuki (.lnk)</string>
+    <string id="30207">Continue</string>
+    <string id="30208">Cancel</string>
 
     <string id="30300">Valitse toiminto kohteelle %s</string>
     <string id="30301">Muokkaa tietoja</string>
@@ -150,7 +149,7 @@
     <string id="30313">Valitse paikallinen kuva (linkitä)</string>
     <string id="30315">Muokkaa parametreja : %s</string>
     <string id="30316">Talleta tiedot NFO-tiedostoon</string>
-    <string id="30329">Vaihda XBMC kokoruudun tilaa : %s</string>
+    <string id="30329">Vaihda Kodi kokoruudun tilaa : %s</string>
     <string id="30317">Muokkaa kohteiden tiedostopäätteitä : %s</string>
     <string id="30318">Tyhjennä kohteiden lista</string>
     <string id="30319">Muokkaa käynnistimen kuvauksia</string>
