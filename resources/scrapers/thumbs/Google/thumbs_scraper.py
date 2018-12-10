@@ -20,7 +20,7 @@ def _get_thumbnails_list(system,search,region,imgsize):
         f = urllib2.urlopen(req)
         search_results = {}
         search_results = f.read()
-        results =  re.findall('<div jsname=".*?" class="rg_meta notranslate">.*?"ou":"(.*?)",.*?"tu":"(.*?)".*?}</div>', search_results)
+        results =  re.findall('<div jscontroller=".*?" class="rg_.*?">.*?"ou":"(.*?)",.*?"tu":"(.*?)".*?}</div>', search_results)
         for index, images in enumerate(results):
             covers.append((images[0],images[0],"Image "+str(index+1)))
         return covers
