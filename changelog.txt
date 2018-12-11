@@ -1,3 +1,12 @@
+[B]2.5.8.u2[/B]
+. Fix GameFAQs, MobyGames, arcadeHITS, and Google scrapers.
+. TheGamesDB may be updated once API/server situation is no longer in flux
+. Updated script base to Advanced Launcher 2.5.8
+
+[B]2.5.8.u1[/B]
+. Fixed issues with existing scrapers
+. Added check for server blockes
+
 [B]2.5.8[/B]
 . Esthetic update related to Kodi/Helix version.
 
