@@ -96,8 +96,8 @@ def _get_fanart(image_url):
         req = urllib2.Request(url, headers=hdr)
         f = urllib2.urlopen(req)
         search_page = f.read().replace('\r\n', '')
-        images = re.findall('<img class="full_boxshot" src="(.*?)" alt=".*?">', search_page)
-        return images[0]
+        images = re.findall('<img class="full_boxshot(.*?) src="(.*?)" alt=".*?">', search_page)
+        return images[0][1]
     except urllib2.HTTPError, e:
         if e.reason == "Unauthorized":
             ret = xbmcgui.Dialog().yesno(__language__( 30196 ), __language__( 30197 ), __language__( 30198 ), __language__( 30199 ),__language__( 30207 ), __language__( 30208 ))  

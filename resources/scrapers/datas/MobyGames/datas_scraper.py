@@ -23,7 +23,7 @@ def _get_games_list(search):
                         for version in split_versions:
                             game = {}
                             game["title"] = unescape(game_title[0][1].replace('&#x26;','&').replace('&#x27;',"'"))
-                            game["id"] = 'http://www.mobygames.com'+version[0]
+                            game["id"] = version[0]
                             game["gamesys"] = version[1]
                             results.append(game)
                             display.append(game["title"]+" / "+game["gamesys"])
@@ -32,7 +32,7 @@ def _get_games_list(search):
                         game["title"] = unescape(game_title[0][1].replace('&#x26;','&').replace('&#x27;',"'"))
                         one_version = re.findall('<span style="white-space: nowrap">(.*?) \(<em>', games)
                         if one_version:
-                            game["id"] = 'http://www.mobygames.com'+game_title[0][0]
+                            game["id"] = game_title[0][0]
                             game["gamesys"] = one_version[0]
                             results.append(game)
                             display.append(game["title"]+" / "+game["gamesys"])
@@ -58,7 +58,7 @@ def _get_first_game(search,gamesys):
                         for version in split_versions:
                             game = {}
                             game["title"] = unescape(game_title[0][1].replace('&#x26;','&').replace('&#x27;',"'"))
-                            game["id"] = 'http://www.mobygames.com'+version[0]
+                            game["id"] = version[0]
                             game["gamesys"] = version[1]
                             results.append(game)
                     else:
@@ -66,7 +66,7 @@ def _get_first_game(search,gamesys):
                         game["title"] = unescape(game_title[0][1].replace('&#x26;','&').replace('&#x27;',"'"))
                         one_version = re.findall('<span style="white-space: nowrap">(.*?) \(<em>', games)
                         if one_version:
-                            game["id"] = 'http://www.mobygames.com'+game_title[0][0]
+                            game["id"] = game_title[0][0]
                             game["gamesys"] = one_version[0]
                             results.append(game)
         return results
@@ -84,12 +84,12 @@ def _get_game_data(game_object):
         urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
         f = urllib.urlopen(game_object['id'])
         page = f.read().replace('\r\n', '').replace('\n', '')
-        game_genre = re.findall('<a href="/genre/(.*?)">(.*?)</a>', page)
+        game_genre = re.findall('<a href="https://www.mobygames.com/genre/(.*?)">(.*?)</a>', page)
         if game_genre:
             gamedata["genre"] = unescape(game_genre[0][1])
-        game_release = re.findall('/release-info">(.*?)</a>', page)
-        if game_release:
-            gamedata["release"] = game_release[1][-4:]
+        game_release = re.findall('<a href="https://www.mobygames.com/(.*?)/release-info">(.*?)</a>', page)
+        if game_release[1][1]:
+            gamedata["release"] = game_release[1][1]
         game_studio = re.findall('Developed by(.*?)<a href="(.*?)">(.*?)</a>', page)
         if game_studio:
             gamedata["studio"] = unescape(game_studio[0][2])
