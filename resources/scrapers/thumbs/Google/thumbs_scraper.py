@@ -29,6 +29,8 @@ def _get_thumbnails_list(system,search,region,imgsize):
 
 # Get Thumbnail scrapper
 def _get_thumbnail(image_url):
-     return image_url
+    #sometimes google will include unnecessary data on the end of the image so clean that off
+    image = image_url[:image_url.rfind('.', 1) + 4]
+    return image
 
 
