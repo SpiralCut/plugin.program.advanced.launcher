@@ -17,6 +17,7 @@ def __language__(string):
 def _get_game_page_url(system,search):
     platform = _system_conversion(system)
     game = search.replace(' ', '+').lower()
+    platform = platform.replace(' ', '+').lower()
     results = []
     link = ''
     try:

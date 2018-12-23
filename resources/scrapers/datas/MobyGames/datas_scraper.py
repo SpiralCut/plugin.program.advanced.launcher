@@ -43,6 +43,7 @@ def _get_games_list(search):
 # Return 1st Game search
 def _get_first_game(search,gamesys):
     platform = _system_conversion(gamesys)
+    platform = platform.replace(' ','+')
     results = []
     try:
         urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'

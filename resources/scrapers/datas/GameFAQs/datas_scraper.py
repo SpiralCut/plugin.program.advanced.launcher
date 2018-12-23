@@ -60,7 +60,7 @@ def _get_games_list(search):
 
 # Return 1st Game search
 def _get_first_game(search,gamesys):
-    platform = _system_conversion(gamesys)
+    platform = _system_conversion(gamesys).replace(' ','+')
     results = []
     try:
         url = 'http://www.gamefaqs.com/search/index.html?platform='+platform+'&game='+search.replace(' ','+')+''

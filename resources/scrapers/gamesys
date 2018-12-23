@@ -93,11 +93,10 @@
 "Nintendo 64",22,"Nintendo 64",9,"Nintendo 64"
 "Nintendo 64DD",36136,"Nintendo 64DD",9,"Nintendo 64"
 "Nintendo DS",45571,"DS",44,"Nintendo DS"
-"Nintendo Dsi",67128,"DS",87,"Nintendo DS"
+"Nintendo DSi",67128,"DS",87,"Nintendo DS"
 "Nintendo Entertainment System",19,"NES",22,"Nintendo Entertainment System (NES)"
 "Nintendo GameCube",17667,"GameCube",14,"Nintendo GameCube"
 "Nintendo Switch",,"Nintendo Switch",203,"Nintendo Switch"
-"Nintendo Wii U",,"Wii U",,"Nintendo Wii U"
 "Nuon",17668,"Nuon",,
 "Odyssey 2",17,"Odyssey^2",78,
 "Odyssey",25728,"Odyssey",75,
@@ -157,6 +156,7 @@
 "V.Smile",,,42,
 "WebTV Plus",29096,,,
 "Wii",49611,"Wii",82,"Nintendo Wii"
+"Wii U",49611,"Wii U",132,"Nintendo Wii U"
 "Windows Mobile",,"Windows Mobile",66,
 "Windows Phone 7",73830,"Windows Mobile",,
 "WonderSwan",24032,"WonderSwan",48,
