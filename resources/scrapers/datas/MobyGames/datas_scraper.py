@@ -84,7 +84,7 @@ def _get_game_data(game_object):
     try:
         urllib.URLopener.version = 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/35.0.1916.153 Safari/537.36 SE 2.X MetaSr 1.0'
         f = urllib.urlopen(game_object['id'])
-        page = f.read().replace('\r\n', '').replace('\n', '')
+        page = f.read().replace('\r', '').replace('\n', '')
         game_genre = re.findall('<a href="https://www.mobygames.com/genre/(.*?)">(.*?)</a>', page)
         if game_genre:
             gamedata["genre"] = unescape(game_genre[0][1])

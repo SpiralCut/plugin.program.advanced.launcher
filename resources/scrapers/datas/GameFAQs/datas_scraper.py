@@ -114,8 +114,8 @@ def _get_game_data(game_object):
 		#Only need to fetch plot details
         req = urllib2.Request(game_object['id'], headers=hdr)
         f = urllib2.urlopen(req)
-        page = f.read().replace('\r\n', '')
-        game_plot = re.findall('Description</h2></div><div class="body game_desc"><div class="desc">(.*?)</div>', page)
+        page = f.read().replace('\r', '').replace('\n', '')
+        game_plot = re.findall('<div class="desc">(.*?)</div>', page)
         if game_plot:
             gamedata["plot"] = unescape(game_plot[0])
         return gamedata
