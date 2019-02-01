@@ -16,6 +16,7 @@ def __language__(string):
 # Get Game first page
 def _get_game_page_url(system,search):
     platform = _system_conversion(system)
+    platform_for_check = _system_conversion(system)
     game = search.replace(' ', '+').lower()
     platform = platform.replace(' ', '+').lower()
     results = []
@@ -40,7 +41,7 @@ def _get_game_page_url(system,search):
                 info =  re.findall('<div class="sr_info">(.*?), (.*?), (.*?)</div>', get)
                 for gameplatform in gameplatforms:
                     games = {}
-                    if platform == gameplatform[2]:
+                    if platform_for_check == gameplatform[2]:
                         if gameplatform[1]:
 #                       Immediately return game link if platform matches and it is in the top 5zz results
                             if counter <= 3:
