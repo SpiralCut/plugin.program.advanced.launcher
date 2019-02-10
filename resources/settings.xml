@@ -9,7 +9,7 @@
         <setting label="30166" type="enum" id="datas_method" lvalues="30148|30167|30168|30169" default="0"/>
         <setting label="30120" type="enum" id="scrap_info" lvalues="30149|30150" default="0" visible="eq(-1,2) | eq(-1,3)"/>
         <setting id="separator" type="lsep" label="30173"/>
-        <setting label="30121" type="fileenum" id="datas_scraper" default="AllGame" mask="/" values="/resources/scrapers/datas/"/>
+        <setting label="30121" type="fileenum" id="datas_scraper" default="GameFAQs" mask="/" values="/resources/scrapers/datas/"/>
         <setting label="30129" type="bool" id="ignore_bios" default="true" visible="eq(-1,arcadeHITS)"/>
         <setting id="separator" type="lsep" label="30171"/>
         <setting label="30159" type="bool" id="ignore_title" default="false"/>
